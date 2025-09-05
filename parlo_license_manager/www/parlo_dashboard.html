@@ -1,243 +1,287 @@
 {% extends "templates/web.html" %}
 
-{% block title %}{{ _("Parlo License Dashboard") }}{% endblock %}
+{% block title %}Parlo License Dashboard{% endblock %}
 
 {% block page_content %}
-<div class="container">
-    <div class="page-header">
-        <h1>{{ _("License Management Dashboard") }}</h1>
-        <p class="text-muted">{{ _("Organization: ") }} <strong>{{ organization }}</strong></p>
-    </div>
-
+<div class="container-fluid mt-4">
     {% if no_organization %}
     <div class="alert alert-warning">
-        <h4>{{ _("No Organization Access") }}</h4>
-        <p>{{ _("You don't have access to any organization. Please contact your administrator.") }}</p>
+        <h4>No Organization Assigned</h4>
+        <p>{{ message }}</p>
+        {% if available_organizations %}
+        <form id="request-access-form" class="mt-3">
+            <div class="form-group">
+                <label>Select Organization to Request Access:</label>
+                <select class="form-control" id="request-org" style="max-width: 400px;">
+                    <option value="">-- Select Organization --</option>
+                    {% for org in available_organizations %}
+                    <option value="{{ org.name }}">{{ org.organization_name or org.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button type="submit" class="btn btn-primary">Request Access</button>
+        </form>
+        {% endif %}
     </div>
     {% elif no_license_setup %}
     <div class="alert alert-warning">
-        <h4>{{ _("License Not Configured") }}</h4>
-        <p>{{ _("License management has not been set up for your organization. Please contact your administrator.") }}</p>
+        <h4>License Not Configured</h4>
+        <p>{{ message }}</p>
     </div>
     {% else %}
     
+    <!-- Organization Header -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-8">
+                    <h2 class="mb-0">{{ organization }}</h2>
+                    <p class="text-muted mb-0">Campaign Code: <strong>{{ campaign_code or 'Not Set' }}</strong></p>
+                </div>
+                <div class="col-md-4 text-right">
+                    {% if available_organizations and available_organizations|length > 1 %}
+                    <select class="form-control" id="org-switcher" onchange="switchOrganization(this.value)">
+                        {% for org in available_organizations %}
+                        <option value="{{ org }}" {% if org == organization %}selected{% endif %}>{{ org }}</option>
+                        {% endfor %}
+                    </select>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    
     <!-- License Statistics -->
     <div class="row mb-4">
-        <div class="col-md-4">
-            <div class="card">
-                <div class="card-body text-center">
-                    <h3 class="text-primary">{{ total_licenses }}</h3>
-                    <p class="text-muted mb-0">{{ _("Total Licenses") }}</p>
+        <div class="col-md-3">
+            <div class="card bg-primary text-white">
+                <div class="card-body">
+                    <h5 class="card-title">Total Licenses</h5>
+                    <h2>{{ total_licenses }}</h2>
                 </div>
             </div>
         </div>
-        <div class="col-md-4">
-            <div class="card">
-                <div class="card-body text-center">
-                    <h3 class="text-success">{{ used_licenses }}</h3>
-                    <p class="text-muted mb-0">{{ _("Used Licenses") }}</p>
+        <div class="col-md-3">
+            <div class="card bg-success text-white">
+                <div class="card-body">
+                    <h5 class="card-title">Used Licenses</h5>
+                    <h2>{{ used_licenses }}</h2>
                 </div>
             </div>
         </div>
-        <div class="col-md-4">
-            <div class="card">
-                <div class="card-body text-center">
-                    <h3 class="text-warning">{{ available_licenses }}</h3>
-                    <p class="text-muted mb-0">{{ _("Available Licenses") }}</p>
+        <div class="col-md-3">
+            <div class="card bg-info text-white">
+                <div class="card-body">
+                    <h5 class="card-title">Available</h5>
+                    <h2>{{ available_licenses }}</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-warning text-white">
+                <div class="card-body">
+                    <h5 class="card-title">Usage</h5>
+                    <h2>{{ usage_percentage }}%</h2>
                 </div>
             </div>
         </div>
     </div>
-
-    <!-- Progress Bar -->
-    <div class="progress mb-4" style="height: 25px;">
-        <div class="progress-bar bg-success" role="progressbar" 
-             style="width: {{ usage_percentage }}%" 
-             aria-valuenow="{{ usage_percentage }}" 
-             aria-valuemin="0" 
-             aria-valuemax="100">
-            {{ usage_percentage }}% Used
-        </div>
+    
+    {% if license_warning %}
+    <div class="alert alert-danger">
+        <i class="fa fa-exclamation-triangle"></i> {{ license_warning }}
     </div>
-
+    {% endif %}
+    
+    <!-- Action Buttons -->
+    <div class="mb-4">
+        <button class="btn btn-primary btn-lg" onclick="showBulkUpload()">
+            <i class="fa fa-upload"></i> Bulk Upload Licenses
+        </button>
+        <button class="btn btn-secondary btn-lg ml-2" onclick="downloadTemplate()">
+            <i class="fa fa-download"></i> Download Excel Template
+        </button>
+        <button class="btn btn-info btn-lg ml-2" onclick="refreshDashboard()">
+            <i class="fa fa-refresh"></i> Refresh
+        </button>
+    </div>
+    
     <!-- Search Bar -->
-    <div class="row mb-4">
-        <div class="col-md-8">
+    <div class="card mb-4">
+        <div class="card-body">
             <div class="input-group">
-                <input type="text" 
-                       id="search-input" 
-                       class="form-control" 
-                       placeholder="Search by email or mobile number...">
+                <input type="text" class="form-control" id="search-input" placeholder="Search by email or phone number...">
                 <div class="input-group-append">
-                    <button class="btn btn-primary" 
-                            onclick="searchLicenses()" 
-                            type="button">
+                    <button class="btn btn-outline-secondary" type="button" onclick="searchLicenses()">
                         <i class="fa fa-search"></i> Search
                     </button>
                 </div>
             </div>
         </div>
-        <div class="col-md-4 text-right">
-            {% if is_admin %}
-            <button class="btn btn-success" onclick="showBulkUpload()">
-                <i class="fa fa-upload"></i> Bulk License Allocation
-            </button>
-            {% endif %}
-        </div>
     </div>
-
+    
     <!-- Tabs for Allocated and Unallocated -->
     <ul class="nav nav-tabs" role="tablist">
         <li class="nav-item">
             <a class="nav-link active" data-toggle="tab" href="#allocated">
-                {{ _("Allocated Licenses") }} <span class="badge badge-primary">{{ allocated_licenses|length }}</span>
+                Allocated Licenses ({{ allocated_licenses|length }})
             </a>
         </li>
         <li class="nav-item">
             <a class="nav-link" data-toggle="tab" href="#unallocated">
-                {{ _("Unallocated (Leads)") }} <span class="badge badge-warning">{{ unallocated_leads|length }}</span>
+                Unallocated Leads ({{ unallocated_leads|length }})
             </a>
         </li>
     </ul>
-
+    
     <!-- Tab Content -->
     <div class="tab-content mt-3">
-        <!-- Allocated Licenses Tab -->
-        <div id="allocated" class="tab-pane fade show active">
-            <div class="table-responsive">
-                <table class="table table-hover">
-                    <thead>
-                        <tr>
-                            <th>{{ _("Name") }}</th>
-                            <th>{{ _("Email") }}</th>
-                            <th>{{ _("Phone") }}</th>
-                            <th>{{ _("License Number") }}</th>
-                            <th>{{ _("Allocated Date") }}</th>
-                        </tr>
-                    </thead>
-                    <tbody id="allocated-tbody">
-                        {% for contact in allocated_licenses %}
-                        <tr>
-                            <td>{{ contact.first_name }} {{ contact.last_name or '' }}</td>
-                            <td>{{ contact.email_id or '-' }}</td>
-                            <td>{{ contact.mobile_no or '-' }}</td>
-                            <td><code>{{ contact.custom_license_number }}</code></td>
-                            <td>{{ frappe.utils.format_datetime(contact.custom_license_allocated_date) if contact.custom_license_allocated_date else '-' }}</td>
-                        </tr>
-                        {% endfor %}
-                        {% if not allocated_licenses %}
-                        <tr>
-                            <td colspan="5" class="text-center text-muted">{{ _("No licenses allocated yet") }}</td>
-                        </tr>
-                        {% endif %}
-                    </tbody>
-                </table>
+        <!-- Allocated Tab -->
+        <div id="allocated" class="tab-pane active">
+            <div class="card">
+                <div class="card-body">
+                    {% if allocated_licenses %}
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>License Number</th>
+                                    <th>Name</th>
+                                    <th>Email</th>
+                                    <th>Phone</th>
+                                    <th>Allocated Date</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for license in allocated_licenses %}
+                                <tr>
+                                    <td><strong>{{ license.license_number }}</strong></td>
+                                    <td>{{ license.first_name }} {{ license.last_name }}</td>
+                                    <td>{{ license.email_id or '-' }}</td>
+                                    <td>{{ license.phone or '-' }}</td>
+                                    <td>{{ frappe.utils.format_datetime(license.license_allocated_date, "dd/MM/yyyy HH:mm") }}</td>
+                                    <td>
+                                        <a href="/app/contact/{{ license.name }}" class="btn btn-sm btn-outline-primary">View</a>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="text-muted">No licenses allocated yet.</p>
+                    {% endif %}
+                </div>
             </div>
         </div>
-
-        <!-- Unallocated Leads Tab -->
-        <div id="unallocated" class="tab-pane fade">
-            {% if is_admin and unallocated_leads %}
-            <div class="mb-3">
-                <button class="btn btn-primary" onclick="allocateSelected()" id="allocate-btn" disabled>
-                    <i class="fa fa-check"></i> Allocate License to Selected
-                </button>
-            </div>
-            {% endif %}
-            
-            <div class="table-responsive">
-                <table class="table table-hover">
-                    <thead>
-                        <tr>
-                            {% if is_admin %}
-                            <th width="40">
-                                <input type="checkbox" id="select-all" onchange="toggleSelectAll()">
-                            </th>
-                            {% endif %}
-                            <th>{{ _("Name") }}</th>
-                            <th>{{ _("Email") }}</th>
-                            <th>{{ _("Phone") }}</th>
-                            <th>{{ _("Verified") }}</th>
-                            <th>{{ _("Created") }}</th>
-                        </tr>
-                    </thead>
-                    <tbody id="unallocated-tbody">
-                        {% for lead in unallocated_leads %}
-                        <tr>
-                            {% if is_admin %}
-                            <td>
-                                <input type="checkbox" 
-                                       class="lead-checkbox" 
-                                       value="{{ lead.name }}" 
-                                       onchange="updateAllocateButton()">
-                            </td>
-                            {% endif %}
-                            <td>{{ lead.lead_name or '-' }}</td>
-                            <td>{{ lead.email_id or '-' }}</td>
-                            <td>{{ lead.mobile_no or '-' }}</td>
-                            <td>
-                                {% if lead.custom_parlo_verified %}
-                                <span class="badge badge-success">Verified</span>
-                                {% else %}
-                                <span class="badge badge-secondary">Not Verified</span>
-                                {% endif %}
-                            </td>
-                            <td>{{ frappe.utils.format_date(lead.creation) }}</td>
-                        </tr>
-                        {% endfor %}
-                        {% if not unallocated_leads %}
-                        <tr>
-                            <td colspan="6" class="text-center text-muted">
-                                {% if not campaign_code %}
-                                {{ _("Campaign code not configured for this organization") }}
-                                {% else %}
-                                {{ _("No unallocated leads found") }}
-                                {% endif %}
-                            </td>
-                        </tr>
-                        {% endif %}
-                    </tbody>
-                </table>
+        
+        <!-- Unallocated Tab -->
+        <div id="unallocated" class="tab-pane">
+            <div class="card">
+                <div class="card-body">
+                    {% if unallocated_leads %}
+                    <div class="mb-3">
+                        <button class="btn btn-success" onclick="allocateSelected()" id="allocate-btn" disabled>
+                            <i class="fa fa-check"></i> Allocate Selected
+                        </button>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>
+                                        <input type="checkbox" id="select-all" onchange="toggleSelectAll()">
+                                    </th>
+                                    <th>Lead Name</th>
+                                    <th>Email</th>
+                                    <th>Mobile</th>
+                                    <th>Parlo Verified</th>
+                                    <th>Created</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for lead in unallocated_leads %}
+                                <tr>
+                                    <td>
+                                        <input type="checkbox" class="lead-checkbox" value="{{ lead.name }}" onchange="updateAllocateButton()">
+                                    </td>
+                                    <td>{{ lead.lead_name }}</td>
+                                    <td>{{ lead.email_id or '-' }}</td>
+                                    <td>{{ lead.mobile_no or '-' }}</td>
+                                    <td>
+                                        {% if lead.parlo_verified %}
+                                        <span class="badge badge-success">Verified</span>
+                                        {% else %}
+                                        <span class="badge badge-secondary">Not Verified</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ frappe.utils.format_datetime(lead.creation, "dd/MM/yyyy") }}</td>
+                                    <td>
+                                        <button class="btn btn-sm btn-primary" onclick="allocateSingle('{{ lead.name }}')">Allocate</button>
+                                        <a href="/app/lead/{{ lead.name }}" class="btn btn-sm btn-outline-primary">View</a>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="text-muted">No unallocated leads found. Leads must have campaign code: <strong>{{ campaign_code }}</strong></p>
+                    {% endif %}
+                </div>
             </div>
         </div>
     </div>
+    
     {% endif %}
 </div>
 
 <!-- Bulk Upload Modal -->
-<div class="modal fade" id="bulkUploadModal" tabindex="-1" role="dialog">
-    <div class="modal-dialog modal-lg" role="document">
+<div class="modal fade" id="bulkUploadModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">{{ _("Bulk License Allocation") }}</h5>
-                <button type="button" class="close" data-dismiss="modal">
-                    <span>&times;</span>
-                </button>
+                <h5 class="modal-title">Bulk License Upload</h5>
+                <button type="button" class="close" data-dismiss="modal">&times;</button>
             </div>
             <div class="modal-body">
-                <p>{{ _("Upload an Excel file with the following columns:") }}</p>
-                <ul>
-                    <li><strong>phonenumber</strong> - Phone number with country code</li>
-                    <li><strong>full_name</strong> - Full name of the person</li>
-                    <li><strong>email</strong> - Email address</li>
-                    <li><strong>campaign_code</strong> (optional) - Campaign code</li>
-                </ul>
-                <div class="form-group">
-                    <input type="file" id="bulk-file" accept=".xlsx,.xls" class="form-control">
-                </div>
+                <form id="bulk-upload-form">
+                    <div class="form-group">
+                        <label>Select Excel File</label>
+                        <input type="file" class="form-control-file" id="bulk-file" accept=".xlsx,.xls" required>
+                        <small class="text-muted">
+                            Excel must have columns: phonenumber, full_name, email, campaign_code (optional)
+                        </small>
+                    </div>
+                    <div id="upload-preview" class="mt-3"></div>
+                </form>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-dismiss="modal">{{ _("Close") }}</button>
-                <button type="button" class="btn btn-primary" onclick="uploadBulkFile()">{{ _("Upload & Validate") }}</button>
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="processBulkUpload()">Validate & Upload</button>
             </div>
         </div>
     </div>
 </div>
 
 <script>
+// Dashboard Functions
+function switchOrganization(org) {
+    window.location.href = `/parlo-dashboard?organization=${encodeURIComponent(org)}`;
+}
+
+function refreshDashboard() {
+    window.location.reload();
+}
+
 function searchLicenses() {
     const searchTerm = document.getElementById('search-input').value;
-    if (!searchTerm) return;
+    if (!searchTerm) {
+        frappe.msgprint('Please enter email or phone to search');
+        return;
+    }
     
     frappe.call({
         method: 'parlo_license_manager.www.parlo_dashboard.search_contacts_and_leads',
@@ -247,112 +291,39 @@ function searchLicenses() {
         },
         callback: function(r) {
             if (r.message) {
-                updateSearchResults(r.message);
+                // Display search results
+                console.log(r.message);
+                frappe.msgprint('Search completed. Check console for results.');
             }
         }
     });
 }
 
-function updateSearchResults(results) {
-    // Update allocated table
-    const allocatedBody = document.getElementById('allocated-tbody');
-    allocatedBody.innerHTML = '';
-    
-    if (results.allocated.length > 0) {
-        results.allocated.forEach(contact => {
-            const row = `<tr>
-                <td>${contact.first_name} ${contact.last_name || ''}</td>
-                <td>${contact.email_id || '-'}</td>
-                <td>${contact.mobile_no || '-'}</td>
-                <td><code>${contact.custom_license_number}</code></td>
-                <td>-</td>
-            </tr>`;
-            allocatedBody.innerHTML += row;
-        });
-    } else {
-        allocatedBody.innerHTML = '<tr><td colspan="5" class="text-center">No results found</td></tr>';
-    }
-    
-    // Update unallocated table
-    const unallocatedBody = document.getElementById('unallocated-tbody');
-    unallocatedBody.innerHTML = '';
-    
-    if (results.unallocated.length > 0) {
-        results.unallocated.forEach(lead => {
-            const row = `<tr>
-                <td><input type="checkbox" class="lead-checkbox" value="${lead.name}"></td>
-                <td>${lead.lead_name || '-'}</td>
-                <td>${lead.email_id || '-'}</td>
-                <td>${lead.mobile_no || '-'}</td>
-                <td>${lead.custom_parlo_verified ? 'Verified' : 'Not Verified'}</td>
-                <td>-</td>
-            </tr>`;
-            unallocatedBody.innerHTML += row;
-        });
-    } else {
-        unallocatedBody.innerHTML = '<tr><td colspan="6" class="text-center">No results found</td></tr>';
-    }
-}
-
-function toggleSelectAll() {
-    const selectAll = document.getElementById('select-all');
-    const checkboxes = document.querySelectorAll('.lead-checkbox');
-    checkboxes.forEach(cb => cb.checked = selectAll.checked);
-    updateAllocateButton();
-}
-
-function updateAllocateButton() {
-    const selected = document.querySelectorAll('.lead-checkbox:checked');
-    const allocateBtn = document.getElementById('allocate-btn');
-    if (allocateBtn) {
-        allocateBtn.disabled = selected.length === 0;
-    }
-}
-
-function allocateSelected() {
-    const selected = Array.from(document.querySelectorAll('.lead-checkbox:checked'))
-                          .map(cb => cb.value);
-    
-    if (selected.length === 0) {
-        frappe.msgprint('Please select at least one lead');
-        return;
-    }
-    
-    if (selected.length > {{ available_licenses }}) {
-        frappe.msgprint(`Only ${{{ available_licenses }}} licenses available. Please select fewer leads.`);
-        return;
-    }
-    
-    frappe.call({
-        method: 'parlo_license_manager.www.parlo_dashboard.allocate_licenses_to_leads',
-        args: {
-            lead_names: selected,
-            organization: '{{ organization }}'
-        },
-        callback: function(r) {
-            if (r.message) {
-                const result = r.message;
-                if (result.success.length > 0) {
-                    frappe.msgprint(`Successfully allocated ${result.success.length} licenses`);
-                    setTimeout(() => location.reload(), 2000);
-                }
-                if (result.failed.length > 0) {
-                    frappe.msgprint(`Failed to allocate ${result.failed.length} licenses`);
-                }
-            }
-        }
-    });
-}
-
+// Bulk Upload Functions
 function showBulkUpload() {
     $('#bulkUploadModal').modal('show');
 }
 
-function uploadBulkFile() {
+function downloadTemplate() {
+    frappe.call({
+        method: 'parlo_license_manager.utils.bulk_upload.get_bulk_upload_template',
+        callback: function(r) {
+            if (r.message && r.message.success) {
+                // Create download link
+                const blob = new Blob([r.message.file_content], {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'license_upload_template.xlsx';
+                a.click();
+            }
+        }
+    });
+}
+
+function processBulkUpload() {
     const fileInput = document.getElementById('bulk-file');
-    const file = fileInput.files[0];
-    
-    if (!file) {
+    if (!fileInput.files[0]) {
         frappe.msgprint('Please select a file');
         return;
     }
@@ -363,30 +334,140 @@ function uploadBulkFile() {
             method: 'parlo_license_manager.utils.bulk_upload.validate_bulk_upload',
             args: {
                 file_content: e.target.result,
-                organization: '{{ organization }}'
+                organization_name: '{{ organization }}'
             },
             callback: function(r) {
-                if (r.message && r.message.success) {
-                    $('#bulkUploadModal').modal('hide');
-                    showValidationResults(r.message);
-                } else {
-                    frappe.msgprint(r.message.error || 'Validation failed');
+                if (r.message) {
+                    if (r.message.success) {
+                        // Show preview
+                        let preview = `
+                            <div class="alert alert-info">
+                                <p>Total Records: ${r.message.total_records}</p>
+                                <p>Valid: ${r.message.valid_records}</p>
+                                <p>Invalid: ${r.message.invalid_records}</p>
+                                <p>Available Licenses: ${r.message.available_licenses}</p>
+                            </div>
+                        `;
+                        
+                        if (r.message.warning_message) {
+                            preview += `<div class="alert alert-warning">${r.message.warning_message}</div>`;
+                        }
+                        
+                        document.getElementById('upload-preview').innerHTML = preview;
+                        
+                        if (r.message.can_proceed) {
+                            frappe.confirm(
+                                'Proceed with allocation?',
+                                () => processAllocation(r.message.records)
+                            );
+                        }
+                    } else {
+                        frappe.msgprint(r.message.error);
+                    }
                 }
             }
         });
     };
-    reader.readAsArrayBuffer(file);
+    reader.readAsArrayBuffer(fileInput.files[0]);
 }
 
-function showValidationResults(result) {
-    // Show validation results and allow allocation
-    // This would be a more detailed implementation
-    frappe.msgprint(`
-        Validation Complete:<br>
-        Valid Records: ${result.valid_records}<br>
-        Invalid Records: ${result.invalid_records}<br>
-        <button class="btn btn-primary" onclick="processBulkAllocation()">Proceed with Allocation</button>
-    `);
+function processAllocation(records) {
+    frappe.call({
+        method: 'parlo_license_manager.utils.bulk_upload.process_bulk_allocation',
+        args: {
+            validated_records: records,
+            organization_name: '{{ organization }}'
+        },
+        callback: function(r) {
+            if (r.message) {
+                if (r.message.success) {
+                    frappe.msgprint(r.message.message);
+                    $('#bulkUploadModal').modal('hide');
+                    setTimeout(() => window.location.reload(), 2000);
+                } else {
+                    frappe.msgprint(r.message.error);
+                }
+            }
+        }
+    });
 }
+
+// Lead Allocation Functions
+function toggleSelectAll() {
+    const selectAll = document.getElementById('select-all').checked;
+    document.querySelectorAll('.lead-checkbox').forEach(cb => {
+        cb.checked = selectAll;
+    });
+    updateAllocateButton();
+}
+
+function updateAllocateButton() {
+    const checkedCount = document.querySelectorAll('.lead-checkbox:checked').length;
+    document.getElementById('allocate-btn').disabled = checkedCount === 0;
+}
+
+function allocateSingle(leadName) {
+    allocateLeads([leadName]);
+}
+
+function allocateSelected() {
+    const selected = [];
+    document.querySelectorAll('.lead-checkbox:checked').forEach(cb => {
+        selected.push(cb.value);
+    });
+    
+    if (selected.length === 0) {
+        frappe.msgprint('Please select leads to allocate');
+        return;
+    }
+    
+    allocateLeads(selected);
+}
+
+function allocateLeads(leadNames) {
+    frappe.call({
+        method: 'parlo_license_manager.www.parlo_dashboard.allocate_licenses_to_leads',
+        args: {
+            lead_names: leadNames,
+            organization: '{{ organization }}'
+        },
+        callback: function(r) {
+            if (r.message) {
+                if (r.message.success) {
+                    const msg = `Successfully allocated ${r.message.success.length} licenses`;
+                    frappe.msgprint(msg);
+                    setTimeout(() => window.location.reload(), 2000);
+                } else if (r.message.error) {
+                    frappe.msgprint(r.message.error);
+                }
+            }
+        }
+    });
+}
+
+// Request Access
+{% if no_organization %}
+document.getElementById('request-access-form')?.addEventListener('submit', function(e) {
+    e.preventDefault();
+    const org = document.getElementById('request-org').value;
+    if (!org) {
+        frappe.msgprint('Please select an organization');
+        return;
+    }
+    
+    frappe.call({
+        method: 'parlo_license_manager.www.parlo_dashboard.request_organization_access',
+        args: {
+            organization: org,
+            reason: 'Requested via dashboard'
+        },
+        callback: function(r) {
+            if (r.message && r.message.success) {
+                frappe.msgprint(r.message.message);
+            }
+        }
+    });
+});
+{% endif %}
 </script>
 {% endblock %}
