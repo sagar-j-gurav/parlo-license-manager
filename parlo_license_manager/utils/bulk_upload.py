@@ -7,7 +7,7 @@ from parlo_license_manager.api.million_verifier import MillionVerifierAPI
 from parlo_license_manager.utils.license_generator import validate_phone_e164, allocate_license
 
 @frappe.whitelist()
-def validate_bulk_upload(file_content, organization):
+def validate_bulk_upload(file_content, organization_name):
     """
     Validate bulk upload Excel file
     Returns: List of validated records with status
@@ -25,15 +25,22 @@ def validate_bulk_upload(file_content, organization):
                 "error": f"Missing required columns: {', '.join(missing_cols)}"
             }
         
-        # Get organization license
-        if not frappe.db.exists("Organization License", organization):
+        # Get organization
+        if not frappe.db.exists("Organization", organization_name):
             return {
                 "success": False,
-                "error": "Organization license not configured"
+                "error": "Organization not found"
             }
         
-        org_license = frappe.get_doc("Organization License", organization)
-        available = org_license.available_licenses
+        org = frappe.get_doc("Organization", organization_name)
+        
+        if not org.has_parlo_license:
+            return {
+                "success": False,
+                "error": "Parlo License is not enabled for this organization"
+            }
+        
+        available = org.available_licenses or 0
         
         # Check license availability
         if len(df) > available:
@@ -115,22 +122,32 @@ def validate_bulk_upload(file_content, organization):
             
             # Check if already allocated
             if record['valid']:
-                # Check by email
+                # Check by email in Contact Email child table
                 if record['email'] and record['email'] != 'nan':
-                    existing = frappe.db.exists("Contact", {
-                        "email_id": record['email'],
-                        "custom_organization": organization
-                    })
+                    existing = frappe.db.sql("""
+                        SELECT c.name 
+                        FROM `tabContact` c
+                        JOIN `tabContact Email` ce ON ce.parent = c.name
+                        WHERE ce.email_id = %s 
+                        AND c.license_organization = %s
+                        LIMIT 1
+                    """, (record['email'], organization_name))
+                    
                     if existing:
                         record['valid'] = False
                         record['errors'].append("License already allocated to this email")
                 
-                # Check by phone if not already marked invalid
+                # Check by phone in Contact Phone child table
                 if record['valid'] and record['phone'] and record['phone'] != 'nan':
-                    existing = frappe.db.exists("Contact", {
-                        "mobile_no": record['phone'],
-                        "custom_organization": organization
-                    })
+                    existing = frappe.db.sql("""
+                        SELECT c.name 
+                        FROM `tabContact` c
+                        JOIN `tabContact Phone` cp ON cp.parent = c.name
+                        WHERE cp.phone = %s 
+                        AND c.license_organization = %s
+                        LIMIT 1
+                    """, (record['phone'], organization_name))
+                    
                     if existing:
                         record['valid'] = False
                         record['errors'].append("License already allocated to this phone number")
@@ -156,7 +173,7 @@ def validate_bulk_upload(file_content, organization):
         return {"success": False, "error": str(e)}
 
 @frappe.whitelist()
-def process_bulk_allocation(validated_records, organization):
+def process_bulk_allocation(validated_records, organization_name):
     """
     Process bulk license allocation for validated records
     """
@@ -186,8 +203,8 @@ def process_bulk_allocation(validated_records, organization):
                 "phone": record['phone'] if record['phone'] != 'nan' else ""
             }
             
-            # Allocate license
-            result = allocate_license(contact_data, organization)
+            # Allocate license using Organization
+            result = allocate_license(contact_data, organization_name)
             
             if result['success']:
                 record['license_number'] = result['license_number']
@@ -203,7 +220,7 @@ def process_bulk_allocation(validated_records, organization):
                 if record.get('campaign_code'):
                     try:
                         contact = frappe.get_doc("Contact", result['contact'])
-                        contact.custom_campaign_code = record['campaign_code']
+                        contact.license_campaign_code = record['campaign_code']
                         contact.save(ignore_permissions=True)
                     except:
                         pass
@@ -213,6 +230,13 @@ def process_bulk_allocation(validated_records, organization):
                     "name": record.get('name'),
                     "errors": [result.get('error', 'Allocation failed')]
                 })
+        
+        # Update organization's campaign code if provided
+        if validated_records and validated_records[0].get('campaign_code'):
+            org = frappe.get_doc("Organization", organization_name)
+            if not org.campaign_code:
+                org.campaign_code = validated_records[0].get('campaign_code')
+                org.save(ignore_permissions=True)
         
         return {
             "success": True,
@@ -263,4 +287,49 @@ def download_error_records(failed_records):
         
     except Exception as e:
         frappe.log_error(f"Download error records failed: {str(e)}", "Bulk Upload")
+        return {"success": False, "error": str(e)}
+
+@frappe.whitelist()
+def get_bulk_upload_template():
+    """Generate Excel template for bulk upload"""
+    try:
+        # Create sample DataFrame
+        df = pd.DataFrame({
+            'phonenumber': ['+971501234567', '+971502345678'],
+            'full_name': ['John Doe', 'Jane Smith'],
+            'email': ['john.doe@example.com', 'jane.smith@example.com'],
+            'campaign_code': ['CAMP001', 'CAMP001']
+        })
+        
+        # Create Excel file in memory
+        output = io.BytesIO()
+        writer = pd.ExcelWriter(output, engine='xlsxwriter')
+        df.to_excel(writer, sheet_name='License Upload', index=False)
+        
+        # Add format to header
+        workbook = writer.book
+        worksheet = writer.sheets['License Upload']
+        
+        # Header format
+        header_format = workbook.add_format({
+            'bold': True,
+            'bg_color': '#D3D3D3',
+            'border': 1
+        })
+        
+        # Write headers with format
+        for col_num, value in enumerate(df.columns.values):
+            worksheet.write(0, col_num, value, header_format)
+        
+        writer.save()
+        output.seek(0)
+        
+        return {
+            "success": True,
+            "file_content": output.getvalue(),
+            "filename": "license_upload_template.xlsx"
+        }
+        
+    except Exception as e:
+        frappe.log_error(f"Template generation failed: {str(e)}", "Bulk Upload")
         return {"success": False, "error": str(e)}
