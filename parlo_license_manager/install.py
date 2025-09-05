@@ -8,7 +8,7 @@ def after_install():
     create_lead_custom_fields()
     create_custom_roles()
     create_workspace()
-    create_web_forms()
+    # Web forms will be created via fixtures or manually
     
 def after_migrate():
     """Called after app migration"""
@@ -161,52 +161,73 @@ def create_workspace():
         workspace.hide_custom = 0
         workspace.is_hidden = 0
         
-        # Add shortcuts
+        # Add shortcuts - these are the key navigation points
         workspace.append("shortcuts", {
             "type": "DocType",
             "label": "Organizations",
             "link_to": "Organization",
-            "doc_view": "List"
+            "doc_view": "List",
+            "color": "Blue",
+            "stats_filter": "{\n \"has_parlo_license\": 1\n}"
         })
         
         workspace.append("shortcuts", {
             "type": "DocType", 
-            "label": "Contacts",
+            "label": "Allocated Licenses (Contacts)",
             "link_to": "Contact",
-            "doc_view": "List"
+            "doc_view": "List",
+            "color": "Green",
+            "stats_filter": "{\n \"has_parlo_license\": 1\n}"
         })
         
         workspace.append("shortcuts", {
             "type": "DocType",
-            "label": "Leads",
+            "label": "Unallocated (Leads)",
             "link_to": "Lead",
-            "doc_view": "List"
+            "doc_view": "List",
+            "color": "Orange",
+            "stats_filter": "{\n \"status\": [\"!=\", \"Converted\"]\n}"
         })
         
         workspace.append("shortcuts", {
             "type": "DocType",
-            "label": "Parlo Whitelist",
-            "link_to": "Parlo Whitelist",
-            "doc_view": "List"
+            "label": "Parlo Authentication Logs",
+            "link_to": "Parlo Authentication Log",
+            "doc_view": "List",
+            "color": "Gray"
         })
         
         workspace.append("shortcuts", {
             "type": "DocType",
             "label": "Settings",
             "link_to": "Parlo Settings",
-            "doc_view": ""
+            "doc_view": "",
+            "color": "Gray"
         })
         
+        # Dashboard Page (if exists)
         workspace.append("shortcuts", {
             "type": "Page",
             "label": "License Dashboard",
-            "link_to": "parlo-dashboard"
+            "link_to": "parlo-dashboard",
+            "color": "Blue"
         })
         
+        # Authentication Page
         workspace.append("shortcuts", {
             "type": "Page",
             "label": "Parlo Authentication",
-            "link_to": "parlo-auth"
+            "link_to": "parlo-auth",
+            "color": "Green"
+        })
+        
+        # Reports/Actions section
+        workspace.append("shortcuts", {
+            "type": "Report",
+            "label": "License Usage Report",
+            "link_to": "License Usage",
+            "is_query_report": 1,
+            "color": "Blue"
         })
         
         try:
@@ -215,62 +236,6 @@ def create_workspace():
             print("Created Parlo License Manager workspace")
         except Exception as e:
             frappe.log_error(f"Error creating workspace: {str(e)}", "Installation")
-
-def create_web_forms():
-    """Create Frappe Web Forms for authentication"""
-    
-    # Create Parlo Authentication Web Form
-    if not frappe.db.exists("Web Form", "parlo-authentication"):
-        web_form = frappe.new_doc("Web Form")
-        web_form.title = "Parlo Authentication"
-        web_form.route = "parlo-auth-form"
-        web_form.published = 1
-        web_form.login_required = 0
-        web_form.allow_multiple = 1
-        web_form.introduction_text = "Please enter your email or mobile number to authenticate with Parlo"
-        web_form.doc_type = "Parlo Authentication Log"  # We'll create this DocType
-        web_form.module = "Parlo License Manager"
-        
-        # Add fields
-        web_form.append("web_form_fields", {
-            "fieldname": "email",
-            "fieldtype": "Data",
-            "label": "Email Address",
-            "options": "Email",
-            "reqd": 0
-        })
-        
-        web_form.append("web_form_fields", {
-            "fieldname": "mobile_number",
-            "fieldtype": "Data",
-            "label": "Mobile Number",
-            "options": "Phone",
-            "reqd": 0,
-            "description": "Enter mobile number (UAE code will be added if missing)"
-        })
-        
-        web_form.append("web_form_fields", {
-            "fieldname": "organization",
-            "fieldtype": "Link",
-            "label": "Organization (Optional)",
-            "options": "Organization",
-            "reqd": 0,
-            "description": "Select your organization or leave blank for auto-detection"
-        })
-        
-        web_form.append("web_form_fields", {
-            "fieldname": "campaign_code",
-            "fieldtype": "Data",
-            "label": "Campaign Code",
-            "hidden": 1
-        })
-        
-        try:
-            web_form.insert(ignore_permissions=True)
-            frappe.db.commit()
-            print("Created Parlo Authentication Web Form")
-        except Exception as e:
-            frappe.log_error(f"Error creating web form: {str(e)}", "Installation")
 
 def update_organization_available_licenses():
     """Update available licenses calculation for all organizations"""
