@@ -42,11 +42,17 @@ def validate_bulk_upload(file_content, organization_name):
         
         available = org.available_licenses or 0
         
-        # Check license availability
+        # Check license availability with proper message
+        if available == 0:
+            return {
+                "success": False,
+                "error": "No licenses available. Please contact Parlo Relationship Manager."
+            }
+        
         if len(df) > available:
             return {
                 "success": False,
-                "error": f"Insufficient licenses. Available: {available}, Requested: {len(df)}"
+                "error": f"Insufficient licenses. Available license count is {available} and requested licenses on excel sheet is {len(df)}. Please contact Parlo Relationship Manager."
             }
         
         # Validate each record
@@ -73,7 +79,7 @@ def validate_bulk_upload(file_content, organization_name):
                 results.append(record)
                 continue
             
-            # Validate phone first if present
+            # Validate phone first if present (as per requirement: search mobile first)
             phone_valid = False
             if record['phone'] and record['phone'] != 'nan':
                 is_valid, formatted = validate_phone_e164(record['phone'])
@@ -85,16 +91,16 @@ def validate_bulk_upload(file_content, organization_name):
                         record['phone'] = formatted
                         record['validation_method'] = 'Phone - Parlo Verified'
                     elif parlo_result['status_code'] == 404:
-                        # User not in Parlo, but phone format is valid
+                        # User not in Parlo, but phone format is valid (E164 validation)
                         phone_valid = True
                         record['phone'] = formatted
-                        record['validation_method'] = 'Phone - Format Valid'
+                        record['validation_method'] = 'Phone - E164 Format Valid'
                     else:
                         record['errors'].append(f"Phone validation failed: {parlo_result['message']}")
                 else:
                     record['errors'].append("Invalid phone format (E164 required)")
             
-            # If phone invalid/missing, try email
+            # If phone invalid/missing, try email (fallback to email if mobile fails)
             email_valid = False
             if not phone_valid and record['email'] and record['email'] != 'nan':
                 # Basic email format check
@@ -107,7 +113,7 @@ def validate_bulk_upload(file_content, organization_name):
                         email_valid = True
                         record['validation_method'] = 'Email - Parlo Verified'
                     elif parlo_result['status_code'] == 404:
-                        # Try Million Verifier
+                        # Try Million Verifier as fallback
                         verify_result = verifier_api.verify_email(record['email'])
                         if verify_result['valid']:
                             email_valid = True
@@ -117,7 +123,15 @@ def validate_bulk_upload(file_content, organization_name):
                     else:
                         record['errors'].append(f"Email check failed: {parlo_result['message']}")
             
-            # Set overall validity
+            # If both mobile and email are provided and mobile failed, try email
+            # This implements the requirement: "if both email and mobile number for a record, 
+            # search mobile number first and if invalid then search for email"
+            if not phone_valid and not email_valid and record['phone'] and record['email']:
+                if record['phone'] != 'nan' and record['email'] != 'nan':
+                    # Already tried above, but ensure we note this in validation method
+                    record['validation_method'] = 'Both phone and email validation failed'
+            
+            # Set overall validity - one of them must be valid as per requirement
             record['valid'] = phone_valid or email_valid
             
             # Check if already allocated
@@ -157,6 +171,19 @@ def validate_bulk_upload(file_content, organization_name):
         # Count valid records
         valid_count = sum(1 for r in results if r['valid'])
         
+        # Check again if valid records exceed available licenses
+        can_proceed = valid_count > 0 and valid_count <= available
+        warning_message = ""
+        
+        if valid_count > available:
+            warning_message = f"Cannot proceed. Valid records ({valid_count}) exceed available licenses ({available}). Please contact Parlo Relationship Manager."
+            can_proceed = False
+        elif available == 0:
+            warning_message = "No licenses available. Please contact Parlo Relationship Manager."
+            can_proceed = False
+        elif available <= 5:
+            warning_message = f"Warning: Only {available} licenses remaining."
+        
         # Create preview response
         return {
             "success": True,
@@ -165,7 +192,8 @@ def validate_bulk_upload(file_content, organization_name):
             "invalid_records": len(results) - valid_count,
             "available_licenses": available,
             "records": results,
-            "can_proceed": valid_count > 0 and valid_count <= available
+            "can_proceed": can_proceed,
+            "warning_message": warning_message
         }
         
     except Exception as e:
@@ -181,6 +209,23 @@ def process_bulk_allocation(validated_records, organization_name):
         if isinstance(validated_records, str):
             import json
             validated_records = json.loads(validated_records)
+        
+        # Re-check available licenses before processing
+        org = frappe.get_doc("Organization", organization_name)
+        available = org.available_licenses or 0
+        valid_records = [r for r in validated_records if r.get('valid')]
+        
+        if available == 0:
+            return {
+                "success": False,
+                "error": "No licenses available. Please contact Parlo Relationship Manager."
+            }
+        
+        if len(valid_records) > available:
+            return {
+                "success": False,
+                "error": f"Insufficient licenses. Available: {available}, Requested: {len(valid_records)}. Please contact Parlo Relationship Manager."
+            }
         
         allocated = []
         failed = []
@@ -238,13 +283,22 @@ def process_bulk_allocation(validated_records, organization_name):
                 org.campaign_code = validated_records[0].get('campaign_code')
                 org.save(ignore_permissions=True)
         
+        # Check remaining licenses and add warning
+        org.reload()
+        remaining_message = ""
+        if org.available_licenses == 0:
+            remaining_message = " No licenses remaining. Please contact Parlo Relationship Manager for additional licenses."
+        elif org.available_licenses <= 5:
+            remaining_message = f" Warning: Only {org.available_licenses} licenses remaining."
+        
         return {
             "success": True,
             "allocated": len(allocated),
             "failed": len(failed),
             "allocated_records": allocated,
             "failed_records": failed,
-            "message": f"Successfully allocated {len(allocated)} licenses"
+            "message": f"Successfully allocated {len(allocated)} licenses.{remaining_message}",
+            "remaining_licenses": org.available_licenses
         }
         
     except Exception as e:
