@@ -1,0 +1,65 @@
+{
+ "actions": [],
+ "creation": "2025-01-10 10:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "parlo_api_section",
+  "parlo_api_key",
+  "parlo_session_cookie",
+  "million_verifier_section",
+  "million_verifier_api_key"
+ ],
+ "fields": [
+  {
+   "fieldname": "parlo_api_section",
+   "fieldtype": "Section Break",
+   "label": "Parlo API Settings"
+  },
+  {
+   "fieldname": "parlo_api_key",
+   "fieldtype": "Data",
+   "label": "Parlo API Key",
+   "reqd": 1
+  },
+  {
+   "fieldname": "parlo_session_cookie",
+   "fieldtype": "Small Text",
+   "label": "Parlo Session Cookie"
+  },
+  {
+   "fieldname": "million_verifier_section",
+   "fieldtype": "Section Break",
+   "label": "Million Verifier Settings"
+  },
+  {
+   "fieldname": "million_verifier_api_key",
+   "fieldtype": "Data",
+   "label": "Million Verifier API Key",
+   "reqd": 1
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "modified": "2025-01-10 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Parlo License Manager",
+ "name": "Parlo Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "track_changes": 1
+}
