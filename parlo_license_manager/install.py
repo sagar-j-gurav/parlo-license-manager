@@ -3,128 +3,18 @@ from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
 def after_install():
     """Called after app installation"""
-    create_organization_license_fields()
+    # Organization is now a proper DocType, no need for custom fields
     create_contact_custom_fields()
     create_lead_custom_fields()
     create_custom_roles()
     create_workspace()
+    create_web_forms()
     
 def after_migrate():
     """Called after app migration"""
-    create_organization_license_fields()
     create_contact_custom_fields()
     create_lead_custom_fields()
     update_organization_available_licenses()
-
-def create_organization_license_fields():
-    """Add license management fields to Organization DocType"""
-    
-    custom_fields = {
-        "Organization": [
-            {
-                "fieldname": "parlo_license_section",
-                "label": "Parlo License Management",
-                "fieldtype": "Section Break",
-                "insert_after": "lft",
-                "collapsible": 1
-            },
-            {
-                "fieldname": "has_parlo_license",
-                "label": "Has Parlo License",
-                "fieldtype": "Check",
-                "insert_after": "parlo_license_section",
-                "description": "Enable Parlo License Management for this organization"
-            },
-            {
-                "fieldname": "campaign_code",
-                "label": "Branch.io Campaign Code",
-                "fieldtype": "Data",
-                "insert_after": "has_parlo_license",
-                "description": "Campaign code from Branch.io for tracking leads",
-                "depends_on": "eval:doc.has_parlo_license"
-            },
-            {
-                "fieldname": "license_prefix",
-                "label": "License Prefix",
-                "fieldtype": "Data",
-                "insert_after": "campaign_code",
-                "description": "Prefix for license numbers (e.g., ORG-2025-)",
-                "depends_on": "eval:doc.has_parlo_license"
-            },
-            {
-                "fieldname": "column_break_parlo",
-                "fieldtype": "Column Break",
-                "insert_after": "license_prefix"
-            },
-            {
-                "fieldname": "total_licenses",
-                "label": "Total Licenses Purchased",
-                "fieldtype": "Int",
-                "insert_after": "column_break_parlo",
-                "default": 0,
-                "depends_on": "eval:doc.has_parlo_license"
-            },
-            {
-                "fieldname": "used_licenses",
-                "label": "Used Licenses",
-                "fieldtype": "Int",
-                "insert_after": "total_licenses",
-                "default": 0,
-                "read_only": 1,
-                "depends_on": "eval:doc.has_parlo_license"
-            },
-            {
-                "fieldname": "available_licenses",
-                "label": "Available Licenses",
-                "fieldtype": "Int",
-                "insert_after": "used_licenses",
-                "read_only": 1,
-                "depends_on": "eval:doc.has_parlo_license"
-            },
-            {
-                "fieldname": "current_license_series",
-                "label": "Current License Series",
-                "fieldtype": "Int",
-                "insert_after": "available_licenses",
-                "default": 0,
-                "read_only": 1,
-                "hidden": 1
-            },
-            {
-                "fieldname": "license_status",
-                "label": "License Status",
-                "fieldtype": "Select",
-                "options": "\nActive\nInactive\nSuspended",
-                "insert_after": "current_license_series",
-                "default": "Active",
-                "depends_on": "eval:doc.has_parlo_license"
-            },
-            {
-                "fieldname": "section_break_users",
-                "label": "License Managers",
-                "fieldtype": "Section Break",
-                "insert_after": "license_status",
-                "depends_on": "eval:doc.has_parlo_license",
-                "collapsible": 1
-            },
-            {
-                "fieldname": "license_managers",
-                "label": "License Manager Users",
-                "fieldtype": "Table MultiSelect",
-                "options": "User",
-                "insert_after": "section_break_users",
-                "description": "Users who can manage licenses for this organization (must have License Manager role)",
-                "depends_on": "eval:doc.has_parlo_license"
-            }
-        ]
-    }
-    
-    try:
-        create_custom_fields(custom_fields, update=True)
-        frappe.db.commit()
-        print("Organization license fields created successfully")
-    except Exception as e:
-        frappe.log_error(f"Error creating Organization fields: {str(e)}", "Installation")
 
 def create_contact_custom_fields():
     """Create custom fields for Contact DocType"""
@@ -295,6 +185,13 @@ def create_workspace():
         
         workspace.append("shortcuts", {
             "type": "DocType",
+            "label": "Parlo Whitelist",
+            "link_to": "Parlo Whitelist",
+            "doc_view": "List"
+        })
+        
+        workspace.append("shortcuts", {
+            "type": "DocType",
             "label": "Settings",
             "link_to": "Parlo Settings",
             "doc_view": ""
@@ -306,12 +203,74 @@ def create_workspace():
             "link_to": "parlo-dashboard"
         })
         
+        workspace.append("shortcuts", {
+            "type": "Page",
+            "label": "Parlo Authentication",
+            "link_to": "parlo-auth"
+        })
+        
         try:
             workspace.insert(ignore_permissions=True)
             frappe.db.commit()
             print("Created Parlo License Manager workspace")
         except Exception as e:
             frappe.log_error(f"Error creating workspace: {str(e)}", "Installation")
+
+def create_web_forms():
+    """Create Frappe Web Forms for authentication"""
+    
+    # Create Parlo Authentication Web Form
+    if not frappe.db.exists("Web Form", "parlo-authentication"):
+        web_form = frappe.new_doc("Web Form")
+        web_form.title = "Parlo Authentication"
+        web_form.route = "parlo-auth-form"
+        web_form.published = 1
+        web_form.login_required = 0
+        web_form.allow_multiple = 1
+        web_form.introduction_text = "Please enter your email or mobile number to authenticate with Parlo"
+        web_form.doc_type = "Parlo Authentication Log"  # We'll create this DocType
+        web_form.module = "Parlo License Manager"
+        
+        # Add fields
+        web_form.append("web_form_fields", {
+            "fieldname": "email",
+            "fieldtype": "Data",
+            "label": "Email Address",
+            "options": "Email",
+            "reqd": 0
+        })
+        
+        web_form.append("web_form_fields", {
+            "fieldname": "mobile_number",
+            "fieldtype": "Data",
+            "label": "Mobile Number",
+            "options": "Phone",
+            "reqd": 0,
+            "description": "Enter mobile number (UAE code will be added if missing)"
+        })
+        
+        web_form.append("web_form_fields", {
+            "fieldname": "organization",
+            "fieldtype": "Link",
+            "label": "Organization (Optional)",
+            "options": "Organization",
+            "reqd": 0,
+            "description": "Select your organization or leave blank for auto-detection"
+        })
+        
+        web_form.append("web_form_fields", {
+            "fieldname": "campaign_code",
+            "fieldtype": "Data",
+            "label": "Campaign Code",
+            "hidden": 1
+        })
+        
+        try:
+            web_form.insert(ignore_permissions=True)
+            frappe.db.commit()
+            print("Created Parlo Authentication Web Form")
+        except Exception as e:
+            frappe.log_error(f"Error creating web form: {str(e)}", "Installation")
 
 def update_organization_available_licenses():
     """Update available licenses calculation for all organizations"""
