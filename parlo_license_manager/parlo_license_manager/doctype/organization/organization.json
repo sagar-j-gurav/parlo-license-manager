@@ -1,0 +1,235 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:organization_name",
+ "creation": "2025-01-01 10:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "organization_name",
+  "company_name",
+  "section_break_1",
+  "address",
+  "city",
+  "state",
+  "country",
+  "column_break_1",
+  "phone",
+  "email",
+  "website",
+  "parlo_license_section",
+  "has_parlo_license",
+  "campaign_code",
+  "license_prefix",
+  "column_break_parlo",
+  "total_licenses",
+  "used_licenses",
+  "available_licenses",
+  "current_license_series",
+  "license_status",
+  "section_break_users",
+  "license_managers"
+ ],
+ "fields": [
+  {
+   "fieldname": "organization_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Organization Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "company_name",
+   "fieldtype": "Data",
+   "label": "Company Name"
+  },
+  {
+   "fieldname": "section_break_1",
+   "fieldtype": "Section Break",
+   "label": "Address Details"
+  },
+  {
+   "fieldname": "address",
+   "fieldtype": "Small Text",
+   "label": "Address"
+  },
+  {
+   "fieldname": "city",
+   "fieldtype": "Data",
+   "label": "City"
+  },
+  {
+   "fieldname": "state",
+   "fieldtype": "Data",
+   "label": "State"
+  },
+  {
+   "fieldname": "country",
+   "fieldtype": "Link",
+   "label": "Country",
+   "options": "Country"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "phone",
+   "fieldtype": "Data",
+   "label": "Phone",
+   "options": "Phone"
+  },
+  {
+   "fieldname": "email",
+   "fieldtype": "Data",
+   "label": "Email",
+   "options": "Email"
+  },
+  {
+   "fieldname": "website",
+   "fieldtype": "Data",
+   "label": "Website"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "parlo_license_section",
+   "fieldtype": "Section Break",
+   "label": "Parlo License Management"
+  },
+  {
+   "default": "0",
+   "description": "Enable Parlo License Management for this organization",
+   "fieldname": "has_parlo_license",
+   "fieldtype": "Check",
+   "label": "Has Parlo License"
+  },
+  {
+   "depends_on": "eval:doc.has_parlo_license",
+   "description": "Campaign code from Branch.io for tracking leads",
+   "fieldname": "campaign_code",
+   "fieldtype": "Data",
+   "label": "Branch.io Campaign Code"
+  },
+  {
+   "depends_on": "eval:doc.has_parlo_license",
+   "description": "Prefix for license numbers (e.g., ORG-2025-)",
+   "fieldname": "license_prefix",
+   "fieldtype": "Data",
+   "label": "License Prefix"
+  },
+  {
+   "fieldname": "column_break_parlo",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "depends_on": "eval:doc.has_parlo_license",
+   "fieldname": "total_licenses",
+   "fieldtype": "Int",
+   "label": "Total Licenses Purchased"
+  },
+  {
+   "default": "0",
+   "depends_on": "eval:doc.has_parlo_license",
+   "fieldname": "used_licenses",
+   "fieldtype": "Int",
+   "label": "Used Licenses",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.has_parlo_license",
+   "fieldname": "available_licenses",
+   "fieldtype": "Int",
+   "label": "Available Licenses",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "current_license_series",
+   "fieldtype": "Int",
+   "hidden": 1,
+   "label": "Current License Series",
+   "read_only": 1
+  },
+  {
+   "default": "Active",
+   "depends_on": "eval:doc.has_parlo_license",
+   "fieldname": "license_status",
+   "fieldtype": "Select",
+   "label": "License Status",
+   "options": "\nActive\nInactive\nSuspended"
+  },
+  {
+   "collapsible": 1,
+   "depends_on": "eval:doc.has_parlo_license",
+   "fieldname": "section_break_users",
+   "fieldtype": "Section Break",
+   "label": "License Managers"
+  },
+  {
+   "depends_on": "eval:doc.has_parlo_license",
+   "description": "Users who can manage licenses for this organization (must have License Manager role)",
+   "fieldname": "license_managers",
+   "fieldtype": "Table",
+   "label": "License Manager Users",
+   "options": "Organization Admin User"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2025-01-01 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Parlo License Manager",
+ "name": "Organization",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 0,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "License Manager",
+   "share": 0,
+   "write": 1
+  },
+  {
+   "create": 0,
+   "delete": 0,
+   "email": 0,
+   "export": 0,
+   "print": 0,
+   "read": 1,
+   "report": 0,
+   "role": "Organization Member",
+   "share": 0,
+   "write": 0
+  }
+ ],
+ "quick_entry": 0,
+ "read_only": 0,
+ "read_only_onload": 0,
+ "search_fields": "organization_name,campaign_code",
+ "show_name_in_global_search": 1,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
