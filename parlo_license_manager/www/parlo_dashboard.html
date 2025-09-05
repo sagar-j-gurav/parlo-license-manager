@@ -1,0 +1,354 @@
+{% extends "templates/web.html" %}
+
+{% block title %}License Dashboard{% endblock %}
+
+{% block page_content %}
+<div class="container-fluid mt-4">
+    <div class="row">
+        <div class="col-12">
+            <h2>License Management Dashboard</h2>
+            <h4 class="text-muted">{{ organization.organization_name }}</h4>
+        </div>
+    </div>
+    
+    <!-- License Statistics -->
+    <div class="row mt-4">
+        <div class="col-md-4">
+            <div class="card bg-primary text-white">
+                <div class="card-body">
+                    <h5 class="card-title">Total Licenses</h5>
+                    <h2>{{ license_stats.total_licenses }}</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card bg-success text-white">
+                <div class="card-body">
+                    <h5 class="card-title">Used Licenses</h5>
+                    <h2>{{ license_stats.used_licenses }}</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card bg-info text-white">
+                <div class="card-body">
+                    <h5 class="card-title">Available Licenses</h5>
+                    <h2>{{ license_stats.available_licenses }}</h2>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Search and Bulk Upload -->
+    <div class="row mt-4">
+        <div class="col-md-6">
+            <div class="input-group">
+                <input type="text" class="form-control" id="search-input" placeholder="Search by email or mobile...">
+                <button class="btn btn-outline-secondary" type="button" id="search-btn">
+                    <i class="fa fa-search"></i> Search
+                </button>
+            </div>
+        </div>
+        <div class="col-md-6 text-end">
+            <button class="btn btn-primary" id="bulk-upload-btn">
+                <i class="fa fa-upload"></i> Bulk License Allocation
+            </button>
+            <input type="file" id="bulk-file-input" accept=".xlsx,.xls" class="d-none">
+        </div>
+    </div>
+    
+    <!-- Tabs for Allocated and Unallocated -->
+    <div class="row mt-4">
+        <div class="col-12">
+            <ul class="nav nav-tabs" id="licenseTab" role="tablist">
+                <li class="nav-item">
+                    <a class="nav-link active" id="allocated-tab" data-bs-toggle="tab" href="#allocated" role="tab">
+                        Allocated Licenses ({{ allocated_licenses|length }})
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" id="unallocated-tab" data-bs-toggle="tab" href="#unallocated" role="tab">
+                        Unallocated Leads ({{ unallocated_leads|length }})
+                    </a>
+                </li>
+            </ul>
+            
+            <div class="tab-content" id="licenseTabContent">
+                <!-- Allocated Licenses Table -->
+                <div class="tab-pane fade show active" id="allocated" role="tabpanel">
+                    <div class="table-responsive mt-3">
+                        <table class="table table-striped" id="allocated-table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Email</th>
+                                    <th>Mobile</th>
+                                    <th>License Number</th>
+                                    <th>Allocated Date</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for license in allocated_licenses %}
+                                <tr>
+                                    <td>{{ license.first_name }} {{ license.last_name or '' }}</td>
+                                    <td>{{ license.email_id or '-' }}</td>
+                                    <td>{{ license.mobile_no or '-' }}</td>
+                                    <td><code>{{ license.license_number }}</code></td>
+                                    <td>{{ frappe.utils.format_datetime(license.allocated_date) }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <!-- Unallocated Leads Table -->
+                <div class="tab-pane fade" id="unallocated" role="tabpanel">
+                    <div class="table-responsive mt-3">
+                        <table class="table table-striped" id="unallocated-table">
+                            <thead>
+                                <tr>
+                                    <th>
+                                        <input type="checkbox" id="select-all-leads">
+                                    </th>
+                                    <th>Lead Name</th>
+                                    <th>Email</th>
+                                    <th>Mobile</th>
+                                    <th>Created</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for lead in unallocated_leads %}
+                                <tr>
+                                    <td>
+                                        <input type="checkbox" class="lead-checkbox" data-lead-id="{{ lead.name }}">
+                                    </td>
+                                    <td>{{ lead.lead_name or '-' }}</td>
+                                    <td>{{ lead.email_id or '-' }}</td>
+                                    <td>{{ lead.mobile_no or '-' }}</td>
+                                    <td>{{ frappe.utils.format_datetime(lead.creation) }}</td>
+                                    <td>
+                                        <button class="btn btn-sm btn-success allocate-btn" data-lead-id="{{ lead.name }}">
+                                            Allocate License
+                                        </button>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                        {% if unallocated_leads|length > 0 %}
+                        <button class="btn btn-primary mt-3" id="allocate-selected-btn">
+                            Allocate Selected Licenses
+                        </button>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Bulk Upload Modal -->
+<div class="modal fade" id="bulkUploadModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Bulk License Allocation</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Upload an Excel file with the following columns:</p>
+                <ul>
+                    <li><strong>phonenumber</strong> - Phone number with country code</li>
+                    <li><strong>full_name</strong> - Full name of the user</li>
+                    <li><strong>email</strong> - Email address</li>
+                    <li><strong>campaign_code</strong> - (Optional) Campaign code</li>
+                </ul>
+                <div id="upload-preview" class="mt-3"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-primary" id="process-bulk-btn">Process Allocation</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+$(document).ready(function() {
+    // Search functionality
+    $('#search-btn').on('click', function() {
+        const searchTerm = $('#search-input').val().toLowerCase();
+        filterTables(searchTerm);
+    });
+    
+    $('#search-input').on('keyup', function(e) {
+        if (e.key === 'Enter') {
+            const searchTerm = $(this).val().toLowerCase();
+            filterTables(searchTerm);
+        }
+    });
+    
+    function filterTables(searchTerm) {
+        // Filter allocated table
+        $('#allocated-table tbody tr').each(function() {
+            const text = $(this).text().toLowerCase();
+            $(this).toggle(text.includes(searchTerm));
+        });
+        
+        // Filter unallocated table
+        $('#unallocated-table tbody tr').each(function() {
+            const text = $(this).text().toLowerCase();
+            $(this).toggle(text.includes(searchTerm));
+        });
+    }
+    
+    // Single license allocation
+    $('.allocate-btn').on('click', function() {
+        const leadId = $(this).data('lead-id');
+        allocateLicense(leadId);
+    });
+    
+    function allocateLicense(leadId) {
+        frappe.call({
+            method: 'parlo_license_manager.www.parlo_dashboard.allocate_single_license',
+            args: { lead_id: leadId },
+            callback: function(r) {
+                if (r.message.success) {
+                    frappe.msgprint({
+                        title: 'Success',
+                        message: 'License allocated successfully. License Number: ' + r.message.license_number,
+                        indicator: 'green'
+                    });
+                    setTimeout(() => location.reload(), 2000);
+                } else {
+                    frappe.msgprint({
+                        title: 'Error',
+                        message: r.message.error || 'Failed to allocate license',
+                        indicator: 'red'
+                    });
+                }
+            }
+        });
+    }
+    
+    // Select all checkboxes
+    $('#select-all-leads').on('change', function() {
+        $('.lead-checkbox').prop('checked', $(this).prop('checked'));
+    });
+    
+    // Allocate selected licenses
+    $('#allocate-selected-btn').on('click', function() {
+        const selectedLeads = [];
+        $('.lead-checkbox:checked').each(function() {
+            selectedLeads.push($(this).data('lead-id'));
+        });
+        
+        if (selectedLeads.length === 0) {
+            frappe.msgprint('Please select at least one lead');
+            return;
+        }
+        
+        // Process each selected lead
+        selectedLeads.forEach(leadId => {
+            allocateLicense(leadId);
+        });
+    });
+    
+    // Bulk upload
+    $('#bulk-upload-btn').on('click', function() {
+        $('#bulk-file-input').click();
+    });
+    
+    $('#bulk-file-input').on('change', function(e) {
+        const file = e.target.files[0];
+        if (file) {
+            handleBulkUpload(file);
+        }
+    });
+    
+    function handleBulkUpload(file) {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        $.ajax({
+            url: '/api/method/parlo_license_manager.www.parlo_dashboard.handle_bulk_upload',
+            type: 'POST',
+            data: formData,
+            processData: false,
+            contentType: false,
+            success: function(response) {
+                if (response.message.success) {
+                    showBulkPreview(response.message);
+                } else {
+                    frappe.msgprint({
+                        title: 'Error',
+                        message: response.message.error,
+                        indicator: 'red'
+                    });
+                }
+            }
+        });
+    }
+    
+    function showBulkPreview(data) {
+        const modal = new bootstrap.Modal(document.getElementById('bulkUploadModal'));
+        
+        let previewHtml = `
+            <div class="alert alert-info">
+                Total Records: ${data.total_records} | 
+                Valid: ${data.valid_records} | 
+                Invalid: ${data.invalid_records}
+            </div>
+        `;
+        
+        if (data.invalid_records > 0) {
+            previewHtml += `<h6>Invalid Records:</h6><ul>`;
+            data.records.filter(r => !r.valid).forEach(record => {
+                previewHtml += `<li>Row ${record.row}: ${record.errors.join(', ')}</li>`;
+            });
+            previewHtml += `</ul>`;
+        }
+        
+        $('#upload-preview').html(previewHtml);
+        modal.show();
+        
+        // Store data for processing
+        window.bulkUploadData = data;
+    }
+    
+    $('#process-bulk-btn').on('click', function() {
+        if (window.bulkUploadData) {
+            processBulkAllocation(window.bulkUploadData);
+        }
+    });
+    
+    function processBulkAllocation(data) {
+        frappe.call({
+            method: 'parlo_license_manager.utils.bulk_upload.process_bulk_allocation',
+            args: {
+                validated_records: data.records.filter(r => r.valid),
+                organization: '{{ organization.name }}'
+            },
+            callback: function(r) {
+                if (r.message.success) {
+                    frappe.msgprint({
+                        title: 'Success',
+                        message: `Allocated ${r.message.allocated} licenses successfully`,
+                        indicator: 'green'
+                    });
+                    setTimeout(() => location.reload(), 2000);
+                } else {
+                    frappe.msgprint({
+                        title: 'Error',
+                        message: r.message.error,
+                        indicator: 'red'
+                    });
+                }
+            }
+        });
+    }
+});
+</script>
+{% endblock %}

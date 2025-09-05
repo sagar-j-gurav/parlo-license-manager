@@ -1,0 +1,101 @@
+{% extends "templates/web.html" %}
+
+{% block title %}Parlo Authentication{% endblock %}
+
+{% block page_content %}
+<div class="container mt-5">
+    <div class="row justify-content-center">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h4 class="mb-0">Parlo License Manager - Login</h4>
+                </div>
+                <div class="card-body">
+                    <form id="auth-form">
+                        <div class="form-group mb-3">
+                            <label for="email">Email Address</label>
+                            <input type="email" class="form-control" id="email" name="email" placeholder="Enter email">
+                        </div>
+                        <div class="form-group mb-3">
+                            <label for="phone">Mobile Number</label>
+                            <input type="tel" class="form-control" id="phone" name="phone" placeholder="Enter mobile (UAE code will be added if missing)">
+                            <small class="text-muted">Enter either email or mobile number</small>
+                        </div>
+                        <div class="alert alert-danger d-none" id="error-message"></div>
+                        <div class="alert alert-success d-none" id="success-message"></div>
+                        <button type="submit" class="btn btn-primary btn-block w-100" id="submit-btn">
+                            <span id="btn-text">Authenticate</span>
+                            <span id="btn-spinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+$(document).ready(function() {
+    $('#auth-form').on('submit', function(e) {
+        e.preventDefault();
+        
+        const email = $('#email').val();
+        const phone = $('#phone').val();
+        
+        if (!email && !phone) {
+            showError('Please enter either email or mobile number');
+            return;
+        }
+        
+        showLoading();
+        
+        frappe.call({
+            method: 'parlo_license_manager.www.parlo_auth.authenticate',
+            args: {
+                data: JSON.stringify({
+                    email: email,
+                    phone: phone
+                })
+            },
+            callback: function(r) {
+                hideLoading();
+                if (r.message.success) {
+                    showSuccess('Authentication successful! Redirecting...');
+                    setTimeout(function() {
+                        window.location.href = r.message.redirect || '/parlo-dashboard';
+                    }, 1500);
+                } else {
+                    showError(r.message.message || 'Authentication failed');
+                }
+            },
+            error: function(r) {
+                hideLoading();
+                showError('An error occurred. Please try again.');
+            }
+        });
+    });
+    
+    function showError(message) {
+        $('#error-message').text(message).removeClass('d-none');
+        $('#success-message').addClass('d-none');
+    }
+    
+    function showSuccess(message) {
+        $('#success-message').text(message).removeClass('d-none');
+        $('#error-message').addClass('d-none');
+    }
+    
+    function showLoading() {
+        $('#submit-btn').prop('disabled', true);
+        $('#btn-text').addClass('d-none');
+        $('#btn-spinner').removeClass('d-none');
+    }
+    
+    function hideLoading() {
+        $('#submit-btn').prop('disabled', false);
+        $('#btn-text').removeClass('d-none');
+        $('#btn-spinner').addClass('d-none');
+    }
+});
+</script>
+{% endblock %}
