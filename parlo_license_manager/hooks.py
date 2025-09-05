@@ -28,3 +28,17 @@ website_route_rules = [
     {"from_route": "/parlo-auth", "to_route": "parlo_auth"},
     {"from_route": "/parlo-dashboard", "to_route": "parlo_dashboard"},
 ]
+
+# Permissions
+# -----------
+# Permissions evaluated in scripted ways
+
+permission_query_conditions = {
+    "Contact": "parlo_license_manager.permissions.contact_query",
+    "Lead": "parlo_license_manager.permissions.lead_query"
+}
+
+has_permission = {
+    "Contact": "parlo_license_manager.permissions.contact_permission",
+    "Lead": "parlo_license_manager.permissions.lead_permission"
+}
