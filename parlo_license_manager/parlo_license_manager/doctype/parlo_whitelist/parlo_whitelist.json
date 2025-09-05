@@ -53,7 +53,7 @@
    "fieldname": "allocated_date",
    "fieldtype": "Datetime",
    "label": "Allocated Date",
-   "default": "__timestamp",
+   "default": "Now",
    "read_only": 1
   },
   {
