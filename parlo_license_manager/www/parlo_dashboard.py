@@ -9,18 +9,46 @@ def get_context(context):
         frappe.local.flags.redirect_location = "/parlo-auth"
         raise frappe.Redirect
     
-    # Get user's organizations
-    user_orgs = get_user_organizations()
+    # Get organization from multiple sources
+    organization_name = None
     
-    if not user_orgs:
+    # Priority 1: URL parameter
+    if frappe.form_dict.get("organization"):
+        organization_name = frappe.form_dict.get("organization")
+    
+    # Priority 2: Get from user's default organization
+    if not organization_name:
+        from parlo_license_manager.api.parlo_integration import get_user_organization
+        organization_name = get_user_organization()
+    
+    # Priority 3: Get user's organizations
+    if not organization_name:
+        user_orgs = get_user_organizations()
+        if user_orgs:
+            organization_name = user_orgs[0]
+    
+    # If still no organization, check if user needs assignment
+    if not organization_name:
         context.no_organization = True
+        context.user_email = frappe.session.user
+        
+        # Get available organizations for assignment request
+        context.available_organizations = frappe.get_all("Organization",
+            filters={"has_parlo_license": 1, "license_status": "Active"},
+            fields=["name", "organization_name"],
+            order_by="organization_name asc"
+        )
+        
+        context.message = "You are not assigned to any organization. Please contact your administrator or select an organization to request access."
         return context
     
-    # Use first organization or get from parameter
-    organization_name = frappe.form_dict.get("organization") or user_orgs[0]
-    
-    if organization_name not in user_orgs:
-        frappe.throw(_("You don't have access to this organization"))
+    # Validate user has access to this organization
+    user_orgs = get_user_organizations()
+    if organization_name not in user_orgs and "System Manager" not in frappe.get_roles():
+        # Try to assign user to organization if they just authenticated
+        from parlo_license_manager.api.parlo_integration import assign_user_to_organization
+        if not assign_user_to_organization(frappe.session.user, organization_name):
+            frappe.throw(_("You don't have access to this organization"))
     
     context.organization = organization_name
     context.available_organizations = user_orgs
@@ -30,6 +58,7 @@ def get_context(context):
     
     if not org.has_parlo_license:
         context.no_license_setup = True
+        context.message = "This organization does not have Parlo License enabled. Please contact your administrator."
         return context
     
     context.org = org
@@ -80,6 +109,12 @@ def get_context(context):
     # Check if user is admin for this organization
     context.is_admin = is_organization_admin(organization_name)
     
+    # Add warning if licenses are running low
+    if context.available_licenses == 0:
+        context.license_warning = "No licenses available. Please contact Parlo Relationship Manager."
+    elif context.available_licenses <= 5:
+        context.license_warning = f"Only {context.available_licenses} licenses remaining."
+    
     return context
 
 def get_user_organizations():
@@ -112,24 +147,44 @@ def get_user_organizations():
         
         return [org[0] for org in orgs] if orgs else []
     
-    # Check if user is Organization Member
-    if "Organization Member" in frappe.get_roles():
-        # Get organizations linked to user's contact
+    # For Organization Members - get from contact links
+    if "Organization Member" in frappe.get_roles() or True:  # Allow for all authenticated users
+        # First check if user has a contact
         contact = frappe.db.get_value("Contact", {"user": user}, "name")
+        
         if contact:
+            # Get organizations from Dynamic Links
             orgs = frappe.db.sql("""
-                SELECT DISTINCT cl.link_name
-                FROM `tabDynamic Link` cl
-                WHERE cl.parent = %s
-                AND cl.link_doctype = 'Organization'
+                SELECT DISTINCT dl.link_name
+                FROM `tabDynamic Link` dl
+                WHERE dl.parent = %s
+                AND dl.link_doctype = 'Organization'
                 AND EXISTS (
                     SELECT 1 FROM `tabOrganization` o 
-                    WHERE o.name = cl.link_name 
+                    WHERE o.name = dl.link_name 
                     AND o.has_parlo_license = 1
                 )
             """, contact, as_list=True)
             
-            return [org[0] for org in orgs] if orgs else []
+            if orgs:
+                return [org[0] for org in orgs]
+        
+        # Also check Contact Links table (in case using different structure)
+        orgs = frappe.db.sql("""
+            SELECT DISTINCT cl.link_name
+            FROM `tabContact` c
+            JOIN `tabContact Link` cl ON cl.parent = c.name
+            WHERE c.user = %s
+            AND cl.link_doctype = 'Organization'
+            AND EXISTS (
+                SELECT 1 FROM `tabOrganization` o 
+                WHERE o.name = cl.link_name 
+                AND o.has_parlo_license = 1
+            )
+        """, user, as_list=True)
+        
+        if orgs:
+            return [org[0] for org in orgs]
     
     return []
 
@@ -226,6 +281,14 @@ def allocate_licenses_to_leads(lead_names, organization):
         except:
             lead_names = [lead_names]
     
+    # Check available licenses first
+    org = frappe.get_doc("Organization", organization)
+    if org.available_licenses < len(lead_names):
+        return {
+            "success": False,
+            "error": f"Insufficient licenses. Available: {org.available_licenses}, Requested: {len(lead_names)}. Please contact Parlo Relationship Manager."
+        }
+    
     results = {
         "success": [],
         "failed": []
@@ -274,10 +337,54 @@ def switch_organization(organization):
     
     user_orgs = get_user_organizations()
     
-    if organization not in user_orgs:
-        frappe.throw(_("You don't have access to this organization"))
+    if organization not in user_orgs and "System Manager" not in frappe.get_roles():
+        # Try to assign user if they have permission
+        from parlo_license_manager.api.parlo_integration import assign_user_to_organization
+        if not assign_user_to_organization(frappe.session.user, organization):
+            frappe.throw(_("You don't have access to this organization"))
     
     # Set in session for persistence
-    frappe.cache().hset("user_org", frappe.session.user, organization)
+    frappe.cache().hset("user_default_org", frappe.session.user, organization)
     
     return {"success": True, "organization": organization}
+
+@frappe.whitelist()
+def request_organization_access(organization, reason=""):
+    """Request access to an organization"""
+    
+    user = frappe.session.user
+    user_doc = frappe.get_doc("User", user)
+    
+    # Create a notification or todo for admin
+    message = f"""
+    User {user_doc.full_name or user} ({user}) has requested access to organization: {organization}
+    
+    Reason: {reason or "No reason provided"}
+    
+    Please assign this user to the organization if appropriate.
+    """
+    
+    # Get organization admins
+    org = frappe.get_doc("Organization", organization)
+    
+    # Send email to admins if SMTP configured
+    if frappe.db.get_single_value("Email Account", "default_outgoing"):
+        admins = []
+        if org.license_managers:
+            admins = [u for u in org.license_managers.split(',')]
+        
+        if admins:
+            frappe.sendmail(
+                recipients=admins,
+                subject=f"Organization Access Request - {organization}",
+                message=message,
+                delayed=False
+            )
+    
+    # Log the request
+    frappe.log_error(message, "Organization Access Request")
+    
+    return {
+        "success": True,
+        "message": "Your request has been submitted. An administrator will review it shortly."
+    }
