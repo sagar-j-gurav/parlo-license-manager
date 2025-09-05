@@ -1,0 +1,1 @@
+parlo_license_manager.patches.migrate_from_organization_license
