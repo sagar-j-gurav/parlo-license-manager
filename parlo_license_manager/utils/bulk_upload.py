@@ -25,20 +25,17 @@ def validate_bulk_upload(file_content, organization):
                 "error": f"Missing required columns: {', '.join(missing_cols)}"
             }
         
-        # Get organization license count
+        # Get organization license
         if not frappe.db.exists("Organization License", organization):
-            # Create default if not exists
-            org_license = frappe.new_doc("Organization License")
-            org_license.organization = organization
-            org_license.total_licenses = 100
-            org_license.used_licenses = 0
-            org_license.available_licenses = 100
-            org_license.insert(ignore_permissions=True)
-        else:
-            org_license = frappe.get_doc("Organization License", organization)
+            return {
+                "success": False,
+                "error": "Organization license not configured"
+            }
         
+        org_license = frappe.get_doc("Organization License", organization)
         available = org_license.available_licenses
         
+        # Check license availability
         if len(df) > available:
             return {
                 "success": False,
@@ -53,69 +50,105 @@ def validate_bulk_upload(file_content, organization):
         for idx, row in df.iterrows():
             record = {
                 "row": idx + 1,
-                "phone": str(row.get('phonenumber', '')),
-                "email": str(row.get('email', '')),
-                "name": str(row.get('full_name', '')),
-                "campaign_code": str(row.get('campaign_code', '')),
+                "phone": str(row.get('phonenumber', '')).strip(),
+                "email": str(row.get('email', '')).strip(),
+                "name": str(row.get('full_name', '')).strip(),
+                "campaign_code": str(row.get('campaign_code', '')).strip() if 'campaign_code' in df.columns else '',
                 "valid": False,
-                "errors": []
+                "errors": [],
+                "validation_method": None
             }
             
-            # Validate phone first
-            phone_valid = False
-            email_valid = False
+            # Skip if both phone and email are empty/nan
+            if (not record['phone'] or record['phone'] == 'nan') and \
+               (not record['email'] or record['email'] == 'nan'):
+                record['errors'].append("Both phone and email are missing")
+                results.append(record)
+                continue
             
+            # Validate phone first if present
+            phone_valid = False
             if record['phone'] and record['phone'] != 'nan':
                 is_valid, formatted = validate_phone_e164(record['phone'])
                 if is_valid:
                     # Check with Parlo
                     parlo_result = parlo_api.search_user(phone_number=formatted)
-                    if parlo_result['success']:
+                    if parlo_result['status_code'] == 200:
                         phone_valid = True
                         record['phone'] = formatted
+                        record['validation_method'] = 'Phone - Parlo Verified'
+                    elif parlo_result['status_code'] == 404:
+                        # User not in Parlo, but phone format is valid
+                        phone_valid = True
+                        record['phone'] = formatted
+                        record['validation_method'] = 'Phone - Format Valid'
                     else:
-                        record['errors'].append(f"Phone not found in Parlo: {parlo_result['message']}")
+                        record['errors'].append(f"Phone validation failed: {parlo_result['message']}")
                 else:
-                    record['errors'].append("Invalid phone format")
+                    record['errors'].append("Invalid phone format (E164 required)")
             
-            # If phone invalid, try email
+            # If phone invalid/missing, try email
+            email_valid = False
             if not phone_valid and record['email'] and record['email'] != 'nan':
-                # Check with Parlo first
-                parlo_result = parlo_api.search_user(email=record['email'])
-                if parlo_result['success']:
-                    email_valid = True
+                # Basic email format check
+                if '@' not in record['email']:
+                    record['errors'].append("Invalid email format")
                 else:
-                    # Try Million Verifier
-                    verify_result = verifier_api.verify_email(record['email'])
-                    if verify_result['valid']:
+                    # Check with Parlo first
+                    parlo_result = parlo_api.search_user(email=record['email'])
+                    if parlo_result['status_code'] == 200:
                         email_valid = True
+                        record['validation_method'] = 'Email - Parlo Verified'
+                    elif parlo_result['status_code'] == 404:
+                        # Try Million Verifier
+                        verify_result = verifier_api.verify_email(record['email'])
+                        if verify_result['valid']:
+                            email_valid = True
+                            record['validation_method'] = 'Email - Million Verifier Valid'
+                        else:
+                            record['errors'].append(f"Email validation failed: {verify_result.get('error', 'Invalid email')}")
                     else:
-                        record['errors'].append(f"Email validation failed: {verify_result.get('error', 'Invalid email')}")
+                        record['errors'].append(f"Email check failed: {parlo_result['message']}")
             
             # Set overall validity
             record['valid'] = phone_valid or email_valid
             
             # Check if already allocated
             if record['valid']:
-                existing = frappe.db.exists("Contact", {
-                    "email_id": record['email'],
-                    "custom_organization": organization
-                })
-                if existing:
-                    record['valid'] = False
-                    record['errors'].append("License already allocated to this user")
+                # Check by email
+                if record['email'] and record['email'] != 'nan':
+                    existing = frappe.db.exists("Contact", {
+                        "email_id": record['email'],
+                        "custom_organization": organization
+                    })
+                    if existing:
+                        record['valid'] = False
+                        record['errors'].append("License already allocated to this email")
+                
+                # Check by phone if not already marked invalid
+                if record['valid'] and record['phone'] and record['phone'] != 'nan':
+                    existing = frappe.db.exists("Contact", {
+                        "mobile_no": record['phone'],
+                        "custom_organization": organization
+                    })
+                    if existing:
+                        record['valid'] = False
+                        record['errors'].append("License already allocated to this phone number")
             
             results.append(record)
         
         # Count valid records
         valid_count = sum(1 for r in results if r['valid'])
         
+        # Create preview response
         return {
             "success": True,
             "total_records": len(results),
             "valid_records": valid_count,
             "invalid_records": len(results) - valid_count,
-            "records": results
+            "available_licenses": available,
+            "records": results,
+            "can_proceed": valid_count > 0 and valid_count <= available
         }
         
     except Exception as e:
@@ -128,38 +161,106 @@ def process_bulk_allocation(validated_records, organization):
     Process bulk license allocation for validated records
     """
     try:
+        if isinstance(validated_records, str):
+            import json
+            validated_records = json.loads(validated_records)
+        
         allocated = []
         failed = []
         
         for record in validated_records:
             if not record.get('valid'):
-                failed.append(record)
+                failed.append({
+                    "row": record.get('row'),
+                    "name": record.get('name'),
+                    "errors": record.get('errors', ['Invalid record'])
+                })
                 continue
             
+            # Prepare contact data
+            name_parts = record['name'].split() if record.get('name') else ['']
             contact_data = {
-                "first_name": record['name'].split()[0] if record['name'] else "",
-                "last_name": ' '.join(record['name'].split()[1:]) if record['name'] else "",
+                "first_name": name_parts[0] if name_parts else "",
+                "last_name": ' '.join(name_parts[1:]) if len(name_parts) > 1 else "",
                 "email": record['email'] if record['email'] != 'nan' else "",
                 "phone": record['phone'] if record['phone'] != 'nan' else ""
             }
             
+            # Allocate license
             result = allocate_license(contact_data, organization)
             
             if result['success']:
                 record['license_number'] = result['license_number']
-                allocated.append(record)
+                allocated.append({
+                    "row": record.get('row'),
+                    "name": record.get('name'),
+                    "email": record.get('email'),
+                    "phone": record.get('phone'),
+                    "license_number": result['license_number']
+                })
+                
+                # If campaign code provided, update the contact
+                if record.get('campaign_code'):
+                    try:
+                        contact = frappe.get_doc("Contact", result['contact'])
+                        contact.custom_campaign_code = record['campaign_code']
+                        contact.save(ignore_permissions=True)
+                    except:
+                        pass
             else:
-                record['errors'] = [result['error']]
-                failed.append(record)
+                failed.append({
+                    "row": record.get('row'),
+                    "name": record.get('name'),
+                    "errors": [result.get('error', 'Allocation failed')]
+                })
         
         return {
             "success": True,
             "allocated": len(allocated),
             "failed": len(failed),
             "allocated_records": allocated,
-            "failed_records": failed
+            "failed_records": failed,
+            "message": f"Successfully allocated {len(allocated)} licenses"
         }
         
     except Exception as e:
         frappe.log_error(f"Bulk allocation error: {str(e)}", "Bulk Allocation")
+        return {"success": False, "error": str(e)}
+
+@frappe.whitelist()
+def download_error_records(failed_records):
+    """Generate Excel file with failed records for re-upload"""
+    try:
+        if isinstance(failed_records, str):
+            import json
+            failed_records = json.loads(failed_records)
+        
+        # Create DataFrame
+        df_data = []
+        for record in failed_records:
+            df_data.append({
+                'phonenumber': record.get('phone', ''),
+                'full_name': record.get('name', ''),
+                'email': record.get('email', ''),
+                'errors': ', '.join(record.get('errors', []))
+            })
+        
+        df = pd.DataFrame(df_data)
+        
+        # Create Excel file in memory
+        output = io.BytesIO()
+        writer = pd.ExcelWriter(output, engine='xlsxwriter')
+        df.to_excel(writer, sheet_name='Failed Records', index=False)
+        writer.save()
+        output.seek(0)
+        
+        # Return file content
+        return {
+            "success": True,
+            "file_content": output.getvalue(),
+            "filename": "failed_records.xlsx"
+        }
+        
+    except Exception as e:
+        frappe.log_error(f"Download error records failed: {str(e)}", "Bulk Upload")
         return {"success": False, "error": str(e)}
