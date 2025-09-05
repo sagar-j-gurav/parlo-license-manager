@@ -21,13 +21,46 @@
                             <input type="tel" class="form-control" id="phone" name="phone" placeholder="Enter mobile (UAE code will be added if missing)">
                             <small class="text-muted">Enter either email or mobile number</small>
                         </div>
+                        
+                        <!-- Organization Selection (optional) -->
+                        {% if available_organizations %}
+                        <div class="form-group mb-3">
+                            <label for="organization">Organization (Optional)</label>
+                            <select class="form-control" id="organization" name="organization">
+                                <option value="">-- Auto-detect from campaign --</option>
+                                {% for org in available_organizations %}
+                                <option value="{{ org.name }}" {% if org.name == organization %}selected{% endif %}>
+                                    {{ org.organization_name or org.name }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                            <small class="text-muted">Select your organization or leave blank for auto-detection</small>
+                        </div>
+                        {% endif %}
+                        
+                        <!-- Campaign Code (hidden or visible based on context) -->
+                        <input type="hidden" id="campaign_code" name="campaign_code" value="{{ campaign_code or '' }}">
+                        {% if campaign_code %}
+                        <div class="alert alert-info mb-3">
+                            <small>Campaign Code: {{ campaign_code }}</small>
+                        </div>
+                        {% endif %}
+                        
                         <div class="alert alert-danger d-none" id="error-message"></div>
                         <div class="alert alert-success d-none" id="success-message"></div>
+                        <div class="alert alert-warning d-none" id="warning-message"></div>
+                        
                         <button type="submit" class="btn btn-primary btn-block w-100" id="submit-btn">
                             <span id="btn-text">Authenticate</span>
                             <span id="btn-spinner" class="spinner-border spinner-border-sm d-none" role="status"></span>
                         </button>
                     </form>
+                    
+                    <div class="mt-3 text-center">
+                        <small class="text-muted">
+                            If you don't have an organization assigned, you'll be prompted after authentication.
+                        </small>
+                    </div>
                 </div>
             </div>
         </div>
@@ -36,11 +69,32 @@
 
 <script>
 $(document).ready(function() {
+    // Get URL parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    const campaignCode = urlParams.get('campaign_code') || $('#campaign_code').val();
+    const presetOrg = urlParams.get('organization') || $('#organization').val();
+    
+    // Auto-detect organization from campaign code if provided
+    if (campaignCode && !presetOrg) {
+        frappe.call({
+            method: 'parlo_license_manager.www.parlo_auth.get_organization_from_campaign',
+            args: { campaign_code: campaignCode },
+            callback: function(r) {
+                if (r.message && r.message.name) {
+                    $('#organization').val(r.message.name);
+                    showWarning('Organization auto-detected from campaign code: ' + (r.message.organization_name || r.message.name));
+                }
+            }
+        });
+    }
+    
     $('#auth-form').on('submit', function(e) {
         e.preventDefault();
         
         const email = $('#email').val();
         const phone = $('#phone').val();
+        const organization = $('#organization').val();
+        const campaign = $('#campaign_code').val();
         
         if (!email && !phone) {
             showError('Please enter either email or mobile number');
@@ -48,22 +102,33 @@ $(document).ready(function() {
         }
         
         showLoading();
+        hideAllMessages();
         
         frappe.call({
             method: 'parlo_license_manager.www.parlo_auth.authenticate',
             args: {
                 data: JSON.stringify({
                     email: email,
-                    phone: phone
+                    phone: phone,
+                    organization: organization,
+                    campaign_code: campaign
                 })
             },
             callback: function(r) {
                 hideLoading();
                 if (r.message.success) {
                     showSuccess('Authentication successful! Redirecting...');
+                    
+                    // Show organization info if assigned
+                    if (r.message.organization) {
+                        showSuccess('Authentication successful! Organization: ' + r.message.organization + '. Redirecting...');
+                    } else {
+                        showWarning('Authentication successful! No organization assigned. You will need to contact your administrator.');
+                    }
+                    
                     setTimeout(function() {
                         window.location.href = r.message.redirect || '/parlo-dashboard';
-                    }, 1500);
+                    }, 2000);
                 } else {
                     showError(r.message.message || 'Authentication failed');
                 }
@@ -78,11 +143,23 @@ $(document).ready(function() {
     function showError(message) {
         $('#error-message').text(message).removeClass('d-none');
         $('#success-message').addClass('d-none');
+        $('#warning-message').addClass('d-none');
     }
     
     function showSuccess(message) {
         $('#success-message').text(message).removeClass('d-none');
         $('#error-message').addClass('d-none');
+        $('#warning-message').addClass('d-none');
+    }
+    
+    function showWarning(message) {
+        $('#warning-message').text(message).removeClass('d-none');
+    }
+    
+    function hideAllMessages() {
+        $('#error-message').addClass('d-none');
+        $('#success-message').addClass('d-none');
+        $('#warning-message').addClass('d-none');
     }
     
     function showLoading() {
