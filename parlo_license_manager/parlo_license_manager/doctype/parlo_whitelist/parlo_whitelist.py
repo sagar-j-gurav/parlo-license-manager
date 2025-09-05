@@ -3,15 +3,30 @@ from frappe.model.document import Document
 
 class ParloWhitelist(Document):
     def validate(self):
-        # Validate email or phone is present
+        """Validate whitelist entry"""
+        # Ensure either email or phone is provided
         if not self.email and not self.phone:
-            frappe.throw("Either Email or Phone number is required")
+            frappe.throw("Either email or phone number is required")
         
-        # Check for duplicate license number
-        if self.license_number:
-            existing = frappe.db.exists(
-                "Parlo Whitelist",
-                {"license_number": self.license_number, "name": ("!=", self.name)}
-            )
+        # Set allocated date if not set
+        if not self.allocated_date:
+            self.allocated_date = frappe.utils.now()
+    
+    def before_insert(self):
+        """Before insert hook"""
+        # Check for duplicates
+        if self.email:
+            existing = frappe.db.exists("Parlo Whitelist", {
+                "email": self.email,
+                "organization": self.organization
+            })
             if existing:
-                frappe.throw(f"License number {self.license_number} already exists")
+                frappe.throw(f"License already allocated to email {self.email}")
+        
+        if self.phone:
+            existing = frappe.db.exists("Parlo Whitelist", {
+                "phone": self.phone,
+                "organization": self.organization
+            })
+            if existing:
+                frappe.throw(f"License already allocated to phone {self.phone}")
