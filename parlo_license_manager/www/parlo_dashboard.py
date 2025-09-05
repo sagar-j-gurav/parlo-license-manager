@@ -2,143 +2,206 @@ import frappe
 from frappe import _
 
 def get_context(context):
-    # Check if user is logged in
-    if frappe.session.user == "Guest":
-        frappe.throw(_("You need to login first"), frappe.PermissionError)
+    """Get context for dashboard page"""
     
-    context.no_cache = 1
-    context.show_sidebar = False
+    # Check if user is logged in and has organization
+    if frappe.session.user == "Guest":
+        frappe.local.flags.redirect_location = "/parlo-auth"
+        raise frappe.Redirect
     
     # Get user's organization
-    user_org = get_user_organization()
-    if not user_org:
-        frappe.throw(_("You are not associated with any organization"), frappe.PermissionError)
+    user_orgs = get_user_organizations()
     
-    context.organization = user_org
-    context.allocated_licenses = get_allocated_licenses(user_org)
-    context.unallocated_leads = get_unallocated_leads(user_org)
-    context.license_stats = get_license_stats(user_org)
+    if not user_orgs:
+        context.no_organization = True
+        return context
+    
+    # Use first organization (can be enhanced for multi-org support)
+    organization = user_orgs[0]
+    context.organization = organization
+    
+    # Get organization license details
+    org_license = None
+    if frappe.db.exists("Organization License", organization):
+        org_license = frappe.get_doc("Organization License", organization)
+        context.org_license = org_license
+        context.campaign_code = org_license.campaign_code
+    else:
+        context.no_license_setup = True
+        return context
+    
+    # Get allocated licenses (from Contacts)
+    allocated_licenses = frappe.get_all("Contact", 
+        filters={
+            "custom_organization": organization,
+            "custom_license_number": ["!=", ""]
+        },
+        fields=[
+            "name", "first_name", "last_name", "email_id", 
+            "mobile_no", "custom_license_number", 
+            "custom_license_allocated_date"
+        ],
+        order_by="creation desc"
+    )
+    
+    # Get unallocated leads (from Leads filtered by campaign code)
+    unallocated_leads = []
+    if org_license and org_license.campaign_code:
+        unallocated_leads = frappe.get_all("Lead", 
+            filters={
+                "custom_campaign_code": org_license.campaign_code,
+                "status": ["not in", ["Converted", "Do Not Contact"]]
+            },
+            fields=[
+                "name", "lead_name", "email_id", "mobile_no",
+                "custom_parlo_verified", "creation"
+            ],
+            order_by="creation desc"
+        )
+    
+    # Statistics
+    context.total_licenses = org_license.total_licenses if org_license else 0
+    context.used_licenses = org_license.used_licenses if org_license else 0
+    context.available_licenses = org_license.available_licenses if org_license else 0
+    context.allocated_licenses = allocated_licenses
+    context.unallocated_leads = unallocated_leads
+    
+    # Add percentage calculations
+    if context.total_licenses > 0:
+        context.usage_percentage = int((context.used_licenses / context.total_licenses) * 100)
+    else:
+        context.usage_percentage = 0
+    
+    # Check if user is admin for this organization
+    context.is_admin = is_organization_admin(organization)
     
     return context
 
-def get_user_organization():
-    """Get organization for current user"""
-    # Check if user is admin for any organization
-    org = frappe.db.sql("""
-        SELECT o.name, o.organization_name
-        FROM `tabOrganization` o
-        JOIN `tabOrganization Admin User` oau ON oau.parent = o.name
+def get_user_organizations():
+    """Get organizations the current user has access to"""
+    
+    # Check if user is System Manager
+    if "System Manager" in frappe.get_roles():
+        return frappe.get_all("Organization", pluck="name")
+    
+    # Check Organization Admin role
+    orgs = frappe.db.sql("""
+        SELECT DISTINCT ol.organization 
+        FROM `tabOrganization License` ol
+        JOIN `tabOrganization Admin User` oau ON oau.parent = ol.name
         WHERE oau.user = %s
-        LIMIT 1
-    """, frappe.session.user, as_dict=True)
+    """, frappe.session.user, as_list=True)
     
-    if org:
-        return org[0]
-    
-    # Check if user has a contact with organization
-    contact = frappe.db.get_value("Contact", 
-        {"email_id": frappe.session.user}, 
-        ["custom_organization"], 
-        as_dict=True
-    )
-    
-    if contact and contact.custom_organization:
-        return frappe.get_doc("Organization", contact.custom_organization)
-    
-    return None
+    return [org[0] for org in orgs] if orgs else []
 
-def get_allocated_licenses(organization):
-    """Get allocated licenses for organization"""
-    return frappe.db.sql("""
-        SELECT 
-            c.name,
-            c.first_name,
-            c.last_name,
-            c.email_id,
-            c.mobile_no,
-            c.custom_license_number as license_number,
-            c.creation as allocated_date
-        FROM `tabContact` c
-        WHERE c.custom_organization = %s
-        ORDER BY c.creation DESC
-        LIMIT 100
-    """, organization.name, as_dict=True)
-
-def get_unallocated_leads(organization):
-    """Get unallocated leads for organization"""
-    campaign_code = frappe.db.get_value("Organization", organization.name, "custom_campaign_code")
+def is_organization_admin(organization):
+    """Check if current user is admin for the organization"""
     
-    if not campaign_code:
-        return []
+    if "System Manager" in frappe.get_roles():
+        return True
     
-    return frappe.db.sql("""
-        SELECT 
-            l.name,
-            l.lead_name,
-            l.email_id,
-            l.mobile_no,
-            l.creation
-        FROM `tabLead` l
-        WHERE l.custom_campaign_code = %s
-        AND l.name NOT IN (
-            SELECT DISTINCT lead 
-            FROM `tabContact` 
-            WHERE lead IS NOT NULL 
-            AND custom_organization = %s
-        )
-        ORDER BY l.creation DESC
-        LIMIT 100
-    """, (campaign_code, organization.name), as_dict=True)
-
-def get_license_stats(organization):
-    """Get license statistics for organization"""
-    stats = frappe.db.get_value("Organization License", 
-        organization.name,
-        ["total_licenses", "used_licenses", "available_licenses"],
-        as_dict=True
-    )
+    if frappe.db.exists("Organization License", organization):
+        org_license = frappe.get_doc("Organization License", organization)
+        admin_users = [admin.user for admin in org_license.admin_users]
+        return frappe.session.user in admin_users
     
-    if not stats:
-        stats = {
-            "total_licenses": 0,
-            "used_licenses": 0,
-            "available_licenses": 0
-        }
-    
-    return stats
+    return False
 
 @frappe.whitelist()
-def allocate_single_license(lead_id):
-    """Allocate license to a single lead"""
-    from parlo_license_manager.utils.license_generator import allocate_license
+def search_contacts_and_leads(search_term, organization):
+    """Search for contacts and leads by email or phone"""
     
-    lead = frappe.get_doc("Lead", lead_id)
-    organization = get_user_organization()
-    
-    if not organization:
-        frappe.throw("Organization not found")
-    
-    contact_data = {
-        "first_name": lead.lead_name.split()[0] if lead.lead_name else "",
-        "last_name": ' '.join(lead.lead_name.split()[1:]) if lead.lead_name else "",
-        "email": lead.email_id,
-        "phone": lead.mobile_no
+    results = {
+        "allocated": [],
+        "unallocated": []
     }
     
-    return allocate_license(contact_data, organization.name)
+    # Search in Contacts (allocated)
+    contact_filters = {
+        "custom_organization": organization,
+        "custom_license_number": ["!=", ""]
+    }
+    
+    if "@" in search_term:
+        contact_filters["email_id"] = ["like", f"%{search_term}%"]
+    else:
+        contact_filters["mobile_no"] = ["like", f"%{search_term}%"]
+    
+    results["allocated"] = frappe.get_all("Contact",
+        filters=contact_filters,
+        fields=["name", "first_name", "last_name", "email_id", 
+                "mobile_no", "custom_license_number"],
+        limit=20
+    )
+    
+    # Search in Leads (unallocated)
+    org_license = frappe.get_doc("Organization License", organization)
+    
+    if org_license.campaign_code:
+        lead_filters = {
+            "custom_campaign_code": org_license.campaign_code,
+            "status": ["not in", ["Converted", "Do Not Contact"]]
+        }
+        
+        if "@" in search_term:
+            lead_filters["email_id"] = ["like", f"%{search_term}%"]
+        else:
+            lead_filters["mobile_no"] = ["like", f"%{search_term}%"]
+        
+        results["unallocated"] = frappe.get_all("Lead",
+            filters=lead_filters,
+            fields=["name", "lead_name", "email_id", "mobile_no", 
+                    "custom_parlo_verified"],
+            limit=20
+        )
+    
+    return results
 
 @frappe.whitelist()
-def handle_bulk_upload():
-    """Handle bulk license upload"""
-    from parlo_license_manager.utils.bulk_upload import validate_bulk_upload
+def allocate_licenses_to_leads(lead_names, organization):
+    """Allocate licenses to selected leads"""
     
-    if 'file' not in frappe.request.files:
-        return {"success": False, "error": "No file uploaded"}
+    from parlo_license_manager.utils.license_generator import allocate_license
     
-    file = frappe.request.files['file']
-    organization = get_user_organization()
+    if isinstance(lead_names, str):
+        lead_names = [lead_names]
     
-    if not organization:
-        return {"success": False, "error": "Organization not found"}
+    results = {
+        "success": [],
+        "failed": []
+    }
     
-    return validate_bulk_upload(file.read(), organization.name)
+    for lead_name in lead_names:
+        try:
+            lead = frappe.get_doc("Lead", lead_name)
+            
+            contact_data = {
+                "first_name": lead.lead_name.split()[0] if lead.lead_name else "",
+                "last_name": " ".join(lead.lead_name.split()[1:]) if lead.lead_name else "",
+                "email": lead.email_id,
+                "phone": lead.mobile_no
+            }
+            
+            result = allocate_license(contact_data, organization)
+            
+            if result["success"]:
+                # Update lead status
+                lead.status = "Converted"
+                lead.save(ignore_permissions=True)
+                results["success"].append({
+                    "lead": lead_name,
+                    "license": result["license_number"]
+                })
+            else:
+                results["failed"].append({
+                    "lead": lead_name,
+                    "error": result["error"]
+                })
+                
+        except Exception as e:
+            results["failed"].append({
+                "lead": lead_name,
+                "error": str(e)
+            })
+    
+    return results
