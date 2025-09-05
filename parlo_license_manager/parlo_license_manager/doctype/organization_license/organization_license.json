@@ -8,10 +8,17 @@
  "engine": "InnoDB",
  "field_order": [
   "organization",
+  "campaign_code",
+  "column_break_1",
+  "license_prefix",
+  "current_series",
+  "section_break_1",
   "total_licenses",
   "used_licenses",
   "available_licenses",
-  "license_prefix",
+  "section_break_2",
+  "admin_users",
+  "section_break_3",
   "status"
  ],
  "fields": [
@@ -24,9 +31,39 @@
    "unique": 1
   },
   {
+   "fieldname": "campaign_code",
+   "fieldtype": "Data",
+   "label": "Branch.io Campaign Code",
+   "description": "Campaign code from Branch.io for this organization"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "license_prefix",
+   "fieldtype": "Data",
+   "label": "License Prefix",
+   "description": "Prefix for license numbers (e.g., ORG-2025-)",
+   "reqd": 1
+  },
+  {
+   "fieldname": "current_series",
+   "fieldtype": "Int",
+   "label": "Current Series Number",
+   "default": 0,
+   "read_only": 1,
+   "description": "Last used number in the series"
+  },
+  {
+   "fieldname": "section_break_1",
+   "fieldtype": "Section Break",
+   "label": "License Counts"
+  },
+  {
    "fieldname": "total_licenses",
    "fieldtype": "Int",
-   "label": "Total Licenses",
+   "label": "Total Licenses Purchased",
    "reqd": 1,
    "default": 0
   },
@@ -44,9 +81,20 @@
    "read_only": 1
   },
   {
-   "fieldname": "license_prefix",
-   "fieldtype": "Data",
-   "label": "License Prefix"
+   "fieldname": "section_break_2",
+   "fieldtype": "Section Break",
+   "label": "Admin Users"
+  },
+  {
+   "fieldname": "admin_users",
+   "fieldtype": "Table",
+   "label": "Admin Users",
+   "options": "Organization Admin User",
+   "description": "Users who can manage licenses for this organization"
+  },
+  {
+   "fieldname": "section_break_3",
+   "fieldtype": "Section Break"
   },
   {
    "fieldname": "status",
